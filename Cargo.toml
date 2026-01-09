@@ -5,12 +5,12 @@ edition = "2024"
 
 [dependencies]
 semver = "1.0.26"
-foundry-compilers = "0.14.1"
+foundry-compilers = "0.19.10"
 serde_json = "1.0.140"
 
 ## Vendored dependencies - See .cargo/config.toml for source substitution
 # Mar 8, 2025: https://github.com/foundry-rs/foundry?branch=master#74b8a802
-foundry-rs-config = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-96c40b6ad6ca444e52520d1ee5e7e84d8aa08b22", package = "foundry-config" }
+foundry-rs-config = { git = "https://github.com/foundry-rs/foundry", tag = "nightly-ad5ff80cc8576274bc20e3218bafd4c9d45994fb", package = "foundry-config" }
 serde = { version = "1.0.219", features = ["derive"] }
 rayon = "1.10.0"
 walkdir = "2.5.0"
