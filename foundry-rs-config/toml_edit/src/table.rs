@@ -5,9 +5,10 @@ use indexmap::map::IndexMap;
 use crate::key::Key;
 use crate::repr::Decor;
 use crate::value::DEFAULT_VALUE_DECOR;
-use crate::{InlineTable, InternalString, Item, KeyMut, Value};
+use crate::{InlineTable, Item, KeyMut, Value};
 
-/// Type representing a TOML non-inline table
+/// A TOML table, a top-level collection of key/[`Value`] pairs under a header and logical
+/// sub-tables
 #[derive(Clone, Debug, Default)]
 pub struct Table {
     // Comments/spaces before and after the header
@@ -19,7 +20,7 @@ pub struct Table {
     // Used for putting tables back in their original order when serialising.
     //
     // `None` for user created tables (can be overridden with `set_position`)
-    doc_position: Option<usize>,
+    doc_position: Option<isize>,
     pub(crate) span: Option<std::ops::Range<usize>>,
     pub(crate) items: KeyValuePairs,
 }
@@ -33,7 +34,7 @@ impl Table {
         Default::default()
     }
 
-    pub(crate) fn with_pos(doc_position: Option<usize>) -> Self {
+    pub(crate) fn with_pos(doc_position: Option<isize>) -> Self {
         Self {
             doc_position,
             ..Default::default()
@@ -98,14 +99,49 @@ impl Table {
         }
     }
 
+    pub(crate) fn append_all_values<'s>(
+        &'s self,
+        parent: &[&'s Key],
+        values: &mut Vec<(Vec<&'s Key>, &'s Value)>,
+    ) {
+        for (key, value) in self.items.iter() {
+            let mut path = parent.to_vec();
+            path.push(key);
+            match value {
+                Item::Table(table) => {
+                    table.append_all_values(&path, values);
+                }
+                Item::Value(value) => {
+                    if let Some(table) = value.as_inline_table() {
+                        if table.is_dotted() {
+                            table.append_values(&path, values);
+                        } else {
+                            values.push((path, value));
+                        }
+                    } else {
+                        values.push((path, value));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Auto formats the table.
     pub fn fmt(&mut self) {
         decorate_table(self);
     }
 
-    /// Sorts Key/Value Pairs of the table.
+    /// Sorts [Key]/[Value]-pairs of the table
     ///
-    /// Doesn't affect subtables or subarrays.
+    /// <div class="warning">
+    ///
+    /// This sorts the syntactic table (everything under the `[header]`) and not the logical map of
+    /// key-value pairs.
+    /// This does not affect the order of [sub-tables][Table] or [sub-arrays][crate::ArrayOfTables].
+    /// This is not recursive.
+    ///
+    /// </div>
     pub fn sort_values(&mut self) {
         // Assuming standard tables have their doc_position set and this won't negatively impact them
         self.items.sort_keys();
@@ -119,10 +155,19 @@ impl Table {
         }
     }
 
-    /// Sort Key/Value Pairs of the table using the using the comparison function `compare`.
+    /// Sort [Key]/[Value]-pairs of the table using the using the comparison function `compare`
     ///
     /// The comparison function receives two key and value pairs to compare (you can sort by keys or
     /// values or their combination as needed).
+    ///
+    /// <div class="warning">
+    ///
+    /// This sorts the syntactic table (everything under the `[header]`) and not the logical map of
+    /// key-value pairs.
+    /// This does not affect the order of [sub-tables][Table] or [sub-arrays][crate::ArrayOfTables].
+    /// This is not recursive.
+    ///
+    /// </div>
     pub fn sort_values_by<F>(&mut self, mut compare: F)
     where
         F: FnMut(&Key, &Item, &Key, &Item) -> std::cmp::Ordering,
@@ -192,8 +237,10 @@ impl Table {
     }
 
     /// Sets the position of the `Table` within the [`DocumentMut`][crate::DocumentMut].
-    pub fn set_position(&mut self, doc_position: usize) {
-        self.doc_position = Some(doc_position);
+    ///
+    /// Use `None` for having an unspecified location
+    pub fn set_position(&mut self, doc_position: Option<isize>) {
+        self.doc_position = doc_position;
     }
 
     /// The position of the `Table` within the [`DocumentMut`][crate::DocumentMut].
@@ -201,7 +248,7 @@ impl Table {
     /// Returns `None` if the `Table` was created manually (i.e. not via parsing)
     /// in which case its position is set automatically.  This can be overridden with
     /// [`Table::set_position`].
-    pub fn position(&self) -> Option<usize> {
+    pub fn position(&self) -> Option<isize> {
         self.doc_position
     }
 
@@ -228,26 +275,9 @@ impl Table {
             .map(|(_, key, _)| key.as_mut())
     }
 
-    /// Returns the decor associated with a given key of the table.
-    #[deprecated(since = "0.21.1", note = "Replaced with `key_mut`")]
-    pub fn key_decor_mut(&mut self, key: &str) -> Option<&mut Decor> {
-        #![allow(deprecated)]
-        use indexmap::map::MutableKeys;
-        self.items
-            .get_full_mut2(key)
-            .map(|(_, key, _)| key.leaf_decor_mut())
-    }
-
-    /// Returns the decor associated with a given key of the table.
-    #[deprecated(since = "0.21.1", note = "Replaced with `key_mut`")]
-    pub fn key_decor(&self, key: &str) -> Option<&Decor> {
-        #![allow(deprecated)]
-        self.items.get_full(key).map(|(_, key, _)| key.leaf_decor())
-    }
-
     /// The location within the original document
     ///
-    /// This generally requires an [`ImDocument`][crate::ImDocument].
+    /// This generally requires a [`Document`][crate::Document].
     pub fn span(&self) -> Option<std::ops::Range<usize>> {
         self.span.clone()
     }
@@ -302,7 +332,7 @@ impl Table {
 
     /// Gets the given key's corresponding entry in the Table for in-place manipulation.
     pub fn entry<'a>(&'a mut self, key: &str) -> Entry<'a> {
-        // Accept a `&str` rather than an owned type to keep `InternalString`, well, internal
+        // Accept a `&str` rather than an owned type to keep `String`, well, internal
         match self.items.entry(key.into()) {
             indexmap::map::Entry::Occupied(entry) => Entry::Occupied(OccupiedEntry { entry }),
             indexmap::map::Entry::Vacant(entry) => Entry::Vacant(VacantEntry { entry }),
@@ -478,14 +508,14 @@ impl<K: Into<Key>, V: Into<Item>> FromIterator<(K, V)> for Table {
     where
         I: IntoIterator<Item = (K, V)>,
     {
-        let mut table = Table::new();
+        let mut table = Self::new();
         table.extend(iter);
         table
     }
 }
 
 impl IntoIterator for Table {
-    type Item = (InternalString, Item);
+    type Item = (String, Item);
     type IntoIter = IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -524,11 +554,11 @@ pub(crate) const DEFAULT_KEY_DECOR: (&str, &str) = ("", " ");
 pub(crate) const DEFAULT_TABLE_DECOR: (&str, &str) = ("\n", "");
 pub(crate) const DEFAULT_KEY_PATH_DECOR: (&str, &str) = ("", "");
 
-/// An owned iterator type over `Table`'s key/value pairs.
-pub type IntoIter = Box<dyn Iterator<Item = (InternalString, Item)>>;
-/// An iterator type over `Table`'s key/value pairs.
+/// An owned iterator type over [`Table`]'s [`Key`]/[`Item`] pairs
+pub type IntoIter = Box<dyn Iterator<Item = (String, Item)>>;
+/// An iterator type over [`Table`]'s [`Key`]/[`Item`] pairs
 pub type Iter<'a> = Box<dyn Iterator<Item = (&'a str, &'a Item)> + 'a>;
-/// A mutable iterator type over `Table`'s key/value pairs.
+/// A mutable iterator type over [`Table`]'s [`Key`]/[`Item`] pairs
 pub type IterMut<'a> = Box<dyn Iterator<Item = (KeyMut<'a>, &'a mut Item)> + 'a>;
 
 /// This trait represents either a `Table`, or an `InlineTable`.
@@ -573,9 +603,16 @@ pub trait TableLike: crate::private::Sealed {
 
     /// Auto formats the table.
     fn fmt(&mut self);
-    /// Sorts Key/Value Pairs of the table.
+    /// Sorts [Key]/[Value]-pairs of the table
     ///
-    /// Doesn't affect subtables or subarrays.
+    /// <div class="warning">
+    ///
+    /// This sorts the syntactic table (everything under the `[header]`) and not the logical map of
+    /// key-value pairs.
+    /// This does not affect the order of [sub-tables][Table] or [sub-arrays][crate::ArrayOfTables].
+    /// This is not recursive.
+    ///
+    /// </div>
     fn sort_values(&mut self);
     /// Change this table's dotted status
     fn set_dotted(&mut self, yes: bool);
@@ -586,12 +623,6 @@ pub trait TableLike: crate::private::Sealed {
     fn key(&self, key: &str) -> Option<&'_ Key>;
     /// Returns an accessor to a key's formatting
     fn key_mut(&mut self, key: &str) -> Option<KeyMut<'_>>;
-    /// Returns the decor associated with a given key of the table.
-    #[deprecated(since = "0.21.1", note = "Replaced with `key_mut`")]
-    fn key_decor_mut(&mut self, key: &str) -> Option<&mut Decor>;
-    /// Returns the decor associated with a given key of the table.
-    #[deprecated(since = "0.21.1", note = "Replaced with `key_mut`")]
-    fn key_decor(&self, key: &str) -> Option<&Decor>;
 }
 
 impl TableLike for Table {
@@ -654,17 +685,9 @@ impl TableLike for Table {
     fn key_mut(&mut self, key: &str) -> Option<KeyMut<'_>> {
         self.key_mut(key)
     }
-    fn key_decor_mut(&mut self, key: &str) -> Option<&mut Decor> {
-        #![allow(deprecated)]
-        self.key_decor_mut(key)
-    }
-    fn key_decor(&self, key: &str) -> Option<&Decor> {
-        #![allow(deprecated)]
-        self.key_decor(key)
-    }
 }
 
-/// A view into a single location in a map, which may be vacant or occupied.
+/// A view into a single location in a [`Table`], which may be vacant or occupied.
 pub enum Entry<'a> {
     /// An occupied Entry.
     Occupied(OccupiedEntry<'a>),
@@ -710,7 +733,7 @@ impl<'a> Entry<'a> {
     }
 }
 
-/// A view into a single occupied location in a `IndexMap`.
+/// A view into a single occupied location in a [`Table`].
 pub struct OccupiedEntry<'a> {
     pub(crate) entry: indexmap::map::OccupiedEntry<'a, Key, Item>,
 }
@@ -764,7 +787,7 @@ impl<'a> OccupiedEntry<'a> {
     }
 }
 
-/// A view into a single empty location in a `IndexMap`.
+/// A view into a single empty location in a [`Table`].
 pub struct VacantEntry<'a> {
     pub(crate) entry: indexmap::map::VacantEntry<'a, Key, Item>,
 }

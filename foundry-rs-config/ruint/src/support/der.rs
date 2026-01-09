@@ -6,9 +6,9 @@ use crate::Uint;
 use alloc::boxed::Box;
 use core::cmp::Ordering;
 use der::{
-    asn1::{Any, AnyRef, Int, IntRef, Uint as DerUint, UintRef},
     DecodeValue, EncodeValue, Error, FixedTag, Header, Length, Reader, Result, Tag, ValueOrd,
     Writer,
+    asn1::{Any, AnyRef, Int, IntRef, Uint as DerUint, UintRef},
 };
 
 impl<const BITS: usize, const LIMBS: usize> ValueOrd for Uint<BITS, LIMBS> {
@@ -232,7 +232,7 @@ mod tests {
                     proptest!(|(value: Uint<BITS, LIMBS>)| {
                         let serialized = value.to_der().unwrap();
                         let der = <$ty>::from_der(&serialized).unwrap();
-                        let deserialized = der.try_into().unwrap();
+                        let deserialized = Uint::<BITS, LIMBS>::try_from(der).unwrap();
                         assert_eq!(value, deserialized);
                     });
                 });

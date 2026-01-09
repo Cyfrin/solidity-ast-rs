@@ -1,28 +1,25 @@
+use crate::{
+    fields::{Field, PrimeField},
+    AdditiveGroup, FftField, LegendreSymbol, One, SqrtPrecomputation, ToConstraintField,
+    UniformRand, Zero,
+};
 use ark_serialize::{
     CanonicalDeserialize, CanonicalDeserializeWithFlags, CanonicalSerialize,
     CanonicalSerializeWithFlags, Compress, EmptyFlags, Flags, SerializationError, Valid, Validate,
 };
 use ark_std::{
-    cmp::{Ord, Ordering, PartialOrd},
+    cmp::*,
     fmt,
     io::{Read, Write},
-    iter::Chain,
+    iter::*,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
-    vec::Vec,
+    rand::{
+        distributions::{Distribution, Standard},
+        Rng,
+    },
+    vec::*,
 };
-
-use num_traits::{One, Zero};
 use zeroize::Zeroize;
-
-use ark_std::rand::{
-    distributions::{Distribution, Standard},
-    Rng,
-};
-
-use crate::{
-    fields::{Field, PrimeField},
-    LegendreSymbol, SqrtPrecomputation, ToConstraintField, UniformRand,
-};
 
 /// Defines a Cubic extension field from a cubic non-residue.
 pub trait CubicExtConfig: 'static + Send + Sync + Sized {
@@ -78,16 +75,8 @@ pub trait CubicExtConfig: 'static + Send + Sync + Sized {
 
 /// An element of a cubic extension field F_p\[X\]/(X^3 - P::NONRESIDUE) is
 /// represented as c0 + c1 * X + c2 * X^2, for c0, c1, c2 in `P::BaseField`.
-#[derive(Derivative)]
-#[derivative(
-    Default(bound = "P: CubicExtConfig"),
-    Hash(bound = "P: CubicExtConfig"),
-    Clone(bound = "P: CubicExtConfig"),
-    Copy(bound = "P: CubicExtConfig"),
-    Debug(bound = "P: CubicExtConfig"),
-    PartialEq(bound = "P: CubicExtConfig"),
-    Eq(bound = "P: CubicExtConfig")
-)]
+#[derive(Educe)]
+#[educe(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CubicExtField<P: CubicExtConfig> {
     pub c0: P::BaseField,
     pub c1: P::BaseField,
@@ -164,46 +153,10 @@ impl<P: CubicExtConfig> One for CubicExtField<P> {
     }
 }
 
-type BaseFieldIter<P> = <<P as CubicExtConfig>::BaseField as Field>::BasePrimeFieldIter;
-impl<P: CubicExtConfig> Field for CubicExtField<P> {
-    type BasePrimeField = P::BasePrimeField;
-    type BasePrimeFieldIter = Chain<BaseFieldIter<P>, Chain<BaseFieldIter<P>, BaseFieldIter<P>>>;
-
-    const SQRT_PRECOMP: Option<SqrtPrecomputation<Self>> = P::SQRT_PRECOMP;
+impl<P: CubicExtConfig> AdditiveGroup for CubicExtField<P> {
+    type Scalar = Self;
 
     const ZERO: Self = Self::new(P::BaseField::ZERO, P::BaseField::ZERO, P::BaseField::ZERO);
-
-    const ONE: Self = Self::new(P::BaseField::ONE, P::BaseField::ZERO, P::BaseField::ZERO);
-
-    fn extension_degree() -> u64 {
-        3 * P::BaseField::extension_degree()
-    }
-
-    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
-        let fe = P::BaseField::from_base_prime_field(elem);
-        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
-    }
-
-    fn to_base_prime_field_elements(&self) -> Self::BasePrimeFieldIter {
-        self.c0.to_base_prime_field_elements().chain(
-            self.c1
-                .to_base_prime_field_elements()
-                .chain(self.c2.to_base_prime_field_elements()),
-        )
-    }
-
-    fn from_base_prime_field_elems(elems: &[Self::BasePrimeField]) -> Option<Self> {
-        if elems.len() != (Self::extension_degree() as usize) {
-            return None;
-        }
-        let base_ext_deg = P::BaseField::extension_degree() as usize;
-        Some(Self::new(
-            P::BaseField::from_base_prime_field_elems(&elems[0..base_ext_deg]).unwrap(),
-            P::BaseField::from_base_prime_field_elems(&elems[base_ext_deg..2 * base_ext_deg])
-                .unwrap(),
-            P::BaseField::from_base_prime_field_elems(&elems[2 * base_ext_deg..]).unwrap(),
-        ))
-    }
 
     fn double(&self) -> Self {
         let mut result = *self;
@@ -223,6 +176,48 @@ impl<P: CubicExtConfig> Field for CubicExtField<P> {
         self.c1.neg_in_place();
         self.c2.neg_in_place();
         self
+    }
+}
+
+impl<P: CubicExtConfig> Field for CubicExtField<P> {
+    type BasePrimeField = P::BasePrimeField;
+
+    const SQRT_PRECOMP: Option<SqrtPrecomputation<Self>> = P::SQRT_PRECOMP;
+
+    const ONE: Self = Self::new(P::BaseField::ONE, P::BaseField::ZERO, P::BaseField::ZERO);
+
+    fn extension_degree() -> u64 {
+        3 * P::BaseField::extension_degree()
+    }
+
+    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
+        let fe = P::BaseField::from_base_prime_field(elem);
+        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
+    }
+
+    fn to_base_prime_field_elements(&self) -> impl Iterator<Item = Self::BasePrimeField> {
+        self.c0
+            .to_base_prime_field_elements()
+            .chain(self.c1.to_base_prime_field_elements())
+            .chain(self.c2.to_base_prime_field_elements())
+    }
+
+    fn from_base_prime_field_elems(
+        elems: impl IntoIterator<Item = Self::BasePrimeField>,
+    ) -> Option<Self> {
+        let mut elems = elems.into_iter();
+        let elems = elems.by_ref();
+        let base_ext_deg = P::BaseField::extension_degree() as usize;
+        let element = Some(Self::new(
+            P::BaseField::from_base_prime_field_elems(elems.take(base_ext_deg))?,
+            P::BaseField::from_base_prime_field_elems(elems.take(base_ext_deg))?,
+            P::BaseField::from_base_prime_field_elems(elems.take(base_ext_deg))?,
+        ));
+        if elems.next().is_some() {
+            None
+        } else {
+            element
+        }
     }
 
     #[inline]
@@ -334,6 +329,14 @@ impl<P: CubicExtConfig> Field for CubicExtField<P> {
         self.c2.frobenius_map_in_place(power);
 
         P::mul_base_field_by_frob_coeff(&mut self.c1, &mut self.c2, power);
+    }
+
+    fn mul_by_base_prime_field(&self, elem: &Self::BasePrimeField) -> Self {
+        let mut result = *self;
+        result.c0 = result.c0.mul_by_base_prime_field(elem);
+        result.c1 = result.c1.mul_by_base_prime_field(elem);
+        result.c2 = result.c2.mul_by_base_prime_field(elem);
+        result
     }
 }
 
@@ -700,9 +703,9 @@ mod cube_ext_tests {
     use super::*;
     use ark_std::test_rng;
     use ark_test_curves::{
+        ark_ff::Field,
         bls12_381::{Fq, Fq2, Fq6},
         mnt6_753::Fq3,
-        Field,
     };
 
     #[test]
@@ -730,7 +733,7 @@ mod cube_ext_tests {
             for _ in 0..d {
                 random_coeffs.push(Fq::rand(&mut test_rng()));
             }
-            let res = Fq6::from_base_prime_field_elems(&random_coeffs);
+            let res = Fq6::from_base_prime_field_elems(random_coeffs);
             assert_eq!(res, None);
         }
         // Test on slice lengths that are equal to the extension degree
@@ -741,12 +744,13 @@ mod cube_ext_tests {
             for _ in 0..ext_degree {
                 random_coeffs.push(Fq::rand(&mut test_rng()));
             }
-            let actual = Fq6::from_base_prime_field_elems(&random_coeffs).unwrap();
 
             let expected_0 = Fq2::new(random_coeffs[0], random_coeffs[1]);
             let expected_1 = Fq2::new(random_coeffs[2], random_coeffs[3]);
             let expected_2 = Fq2::new(random_coeffs[3], random_coeffs[4]);
             let expected = Fq6::new(expected_0, expected_1, expected_2);
+
+            let actual = Fq6::from_base_prime_field_elems(random_coeffs).unwrap();
             assert_eq!(actual, expected);
         }
     }
@@ -762,8 +766,33 @@ mod cube_ext_tests {
             random_coeffs[0] = random_coeff;
             assert_eq!(
                 res,
-                Fq6::from_base_prime_field_elems(&random_coeffs).unwrap()
+                Fq6::from_base_prime_field_elems(random_coeffs).unwrap()
             );
         }
     }
+}
+
+impl<P: CubicExtConfig> FftField for CubicExtField<P>
+where
+    P::BaseField: FftField,
+{
+    const GENERATOR: Self = Self::new(
+        P::BaseField::GENERATOR,
+        P::BaseField::ZERO,
+        P::BaseField::ZERO,
+    );
+    const TWO_ADICITY: u32 = P::BaseField::TWO_ADICITY;
+    const TWO_ADIC_ROOT_OF_UNITY: Self = Self::new(
+        P::BaseField::TWO_ADIC_ROOT_OF_UNITY,
+        P::BaseField::ZERO,
+        P::BaseField::ZERO,
+    );
+    const SMALL_SUBGROUP_BASE: Option<u32> = P::BaseField::SMALL_SUBGROUP_BASE;
+    const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> = P::BaseField::SMALL_SUBGROUP_BASE_ADICITY;
+    const LARGE_SUBGROUP_ROOT_OF_UNITY: Option<Self> =
+        if let Some(x) = P::BaseField::LARGE_SUBGROUP_ROOT_OF_UNITY {
+            Some(Self::new(x, P::BaseField::ZERO, P::BaseField::ZERO))
+        } else {
+            None
+        };
 }

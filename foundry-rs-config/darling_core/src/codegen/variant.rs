@@ -13,7 +13,7 @@ use crate::usage::{self, IdentRefSet, IdentSet, UsesTypeParams};
 #[derive(Debug, Clone)]
 pub struct Variant<'a> {
     /// The name which will appear in code passed to the `FromMeta` input.
-    pub name_in_attr: Cow<'a, String>,
+    pub name_in_attr: Cow<'a, str>,
 
     /// The name of the variant which will be returned for a given `name_in_attr`.
     pub variant_ident: &'a Ident,
@@ -25,10 +25,6 @@ pub struct Variant<'a> {
 
     /// Whether or not the variant should be skipped in the generated code.
     pub skip: bool,
-
-    /// Whether or not the variant should be used to create an instance for
-    /// `FromMeta::from_word`.
-    pub word: bool,
 
     pub allow_unknown_fields: bool,
 }
@@ -47,7 +43,7 @@ impl<'a> Variant<'a> {
     }
 }
 
-impl<'a> UsesTypeParams for Variant<'a> {
+impl UsesTypeParams for Variant<'_> {
     fn uses_type_params<'b>(
         &self,
         options: &usage::Options,
@@ -57,24 +53,14 @@ impl<'a> UsesTypeParams for Variant<'a> {
     }
 }
 
-impl<'a> ToTokens for Variant<'a> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        if self.data.is_unit() {
-            self.as_unit_match_arm().to_tokens(tokens);
-        } else {
-            self.as_data_match_arm().to_tokens(tokens)
-        }
-    }
-}
-
 /// Code generator for an enum variant in a unit match position.
 /// This is placed in generated `from_string` calls for the parent enum.
 /// Value-carrying variants wrapped in this type will emit code to produce an "unsupported format" error.
 pub struct UnitMatchArm<'a>(&'a Variant<'a>);
 
-impl<'a> ToTokens for UnitMatchArm<'a> {
+impl ToTokens for UnitMatchArm<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let val: &Variant<'a> = self.0;
+        let val: &Variant<'_> = self.0;
 
         if val.skip {
             return;
@@ -128,9 +114,9 @@ impl<'a> ToTokens for UnitMatchArm<'a> {
 /// Unit variants wrapped in this type will emit code to produce an "unsupported format" error.
 pub struct DataMatchArm<'a>(&'a Variant<'a>);
 
-impl<'a> ToTokens for DataMatchArm<'a> {
+impl ToTokens for DataMatchArm<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let val: &Variant<'a> = self.0;
+        let val: &Variant<'_> = self.0;
 
         if val.skip {
             return;
@@ -141,8 +127,16 @@ impl<'a> ToTokens for DataMatchArm<'a> {
         let ty_ident = val.ty_ident;
 
         if val.data.is_unit() {
+            // Allow unit variants to match a list item if it's just a path with no associated
+            // value, e.g. `volume(shout)` is allowed.
             tokens.append_all(quote!(
-                #name_in_attr => ::darling::export::Err(::darling::Error::unsupported_format("list")),
+                #name_in_attr => {
+                    if let ::darling::export::syn::Meta::Path(_) = *__nested {
+                        ::darling::export::Ok(#ty_ident::#variant_ident)
+                    } else {
+                        ::darling::export::Err(::darling::Error::unsupported_format("non-path"))
+                    }
+                },
             ));
 
             return;

@@ -1,0 +1,59 @@
+# The binary target must be set in a single line like this to make it easily
+# removable by the CI "Check effective no_std compatibility" step
+bin = [{ name = "zopfli", required-features = ["std", "gzip", "zlib"] }]
+
+[package]
+name = "zopfli"
+version = "0.8.1"
+description = "A Rust implementation of the Zopfli compression algorithm."
+license = "Apache-2.0"
+keywords = ["compression"]
+homepage = "https://github.com/zopfli-rs/zopfli"
+repository = "https://github.com/zopfli-rs/zopfli"
+readme = "README.md"
+categories = ["compression", "no-std"]
+exclude = [
+  ".github/*",
+  ".gitignore",
+  "Makefile",
+  "benchmark-builds/*",
+  "rustfmt.toml",
+  "test/*",
+]
+edition = "2021"
+rust-version = "1.73.0"
+
+[dependencies]
+crc32fast = { version = "1.4.0", default-features = false, optional = true }
+simd-adler32 = { version = "0.3.7", default-features = false, optional = true }
+bumpalo = "3.16.0"
+log = { version = "0.4.21", optional = true }
+lockfree-object-pool = { version = "0.1.5", optional = true }
+once_cell = { version = "1.19.0", optional = true }
+
+[dev-dependencies]
+proptest = "1.4.0"
+proptest-derive = "0.4.0"
+miniz_oxide = "0.7.3"
+
+[features]
+default = ["std", "gzip", "zlib"]
+gzip = ["dep:crc32fast"]
+zlib = ["dep:simd-adler32"]
+
+std = [
+  "dep:log",
+  "dep:lockfree-object-pool",
+  "dep:once_cell",
+  "crc32fast?/std",
+  "simd-adler32?/std",
+]
+nightly = ["crc32fast?/nightly"]
+
+[profile.release]
+debug = true
+
+# docs.rs uses a nightly toolchain, so it can leverage unstable rustdoc features.
+# Reference: https://docs.rs/about/builds
+[package.metadata.docs.rs]
+cargo-args = ["--all-features"]

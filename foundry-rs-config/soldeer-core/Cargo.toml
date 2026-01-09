@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.83"
+edition = "2024"
+rust-version = "1.88"
 name = "soldeer-core"
-version = "0.5.4"
+version = "0.10.0"
 authors = ["m4rio"]
 build = false
 exclude = ["tests/"]
@@ -33,6 +33,7 @@ keywords = [
 categories = ["development-tools"]
 license = "MIT"
 repository = "https://github.com/mario-eth/soldeer"
+resolver = "2"
 
 [features]
 default = ["rustls"]
@@ -73,7 +74,7 @@ version = "1.0.5"
 version = "0.5.9"
 
 [dependencies.ignore]
-version = "0.4.22"
+version = "0.4.24"
 features = ["simd-accel"]
 
 [dependencies.log]
@@ -133,7 +134,7 @@ features = [
 ]
 
 [dependencies.toml_edit]
-version = "0.22.15"
+version = "0.23.3"
 features = ["serde"]
 
 [dependencies.uuid]
@@ -144,16 +145,13 @@ features = [
 ]
 
 [dependencies.zip]
-version = "2.3.0"
+version = "4.0.0"
 features = ["deflate"]
 default-features = false
 
 [dependencies.zip-extract]
-version = "0.2.0"
-features = [
-    "bzip2",
-    "deflate",
-]
+version = "0.4.0"
+features = ["deflate"]
 default-features = false
 
 [dev-dependencies.mockito]
@@ -170,7 +168,6 @@ version = "0.9.1"
 dbg-macro = "warn"
 manual-string-new = "warn"
 redundant-clone = "warn"
-rustdoc = "warn"
 uninlined-format-args = "warn"
 unwrap_used = "warn"
 use-self = "warn"

@@ -2,7 +2,7 @@ use crate::{
     cache::SOLIDITY_FILES_CACHE_FILENAME,
     compilers::{multi::MultiCompilerLanguage, Language},
     flatten::{collect_ordered_deps, combine_version_pragmas},
-    resolver::{parse::SolData, SolImportAlias},
+    resolver::{parse::SolParser, SolImportAlias},
     Graph,
 };
 use foundry_compilers_artifacts::{
@@ -110,7 +110,7 @@ impl ProjectPathsConfig<SolcLanguage> {
         }
 
         let sources = Source::read_all_files(input_files)?;
-        let graph = Graph::<SolData>::resolve_sources(self, sources)?;
+        let graph = Graph::<SolParser>::resolve_sources(self, sources)?;
         let ordered_deps = collect_ordered_deps(&flatten_target, self, &graph)?;
 
         #[cfg(windows)]
@@ -524,7 +524,12 @@ impl<L> ProjectPathsConfig<L> {
             })
             .find_map(|r| {
                 import.strip_prefix(&r.name).ok().map(|stripped_import| {
-                    let lib_path = Path::new(&r.path).join(stripped_import);
+                    let lib_path =
+                        if stripped_import.as_os_str().is_empty() && r.path.ends_with(".sol") {
+                            r.path.clone().into()
+                        } else {
+                            Path::new(&r.path).join(stripped_import)
+                        };
 
                     // we handle the edge case where the path of a remapping ends with "contracts"
                     // (`<name>/=.../contracts`) and the stripped import also starts with
@@ -544,36 +549,14 @@ impl<L> ProjectPathsConfig<L> {
         }
     }
 
-    pub fn with_language<Lang>(self) -> ProjectPathsConfig<Lang> {
-        let Self {
-            root,
-            cache,
-            artifacts,
-            build_infos,
-            sources,
-            tests,
-            scripts,
-            libraries,
-            remappings,
-            include_paths,
-            allowed_paths,
-            _l,
-        } = self;
+    pub fn with_language_ref<Lang>(&self) -> &ProjectPathsConfig<Lang> {
+        // SAFETY: `Lang` is `PhantomData`.
+        unsafe { std::mem::transmute(self) }
+    }
 
-        ProjectPathsConfig {
-            root,
-            cache,
-            artifacts,
-            build_infos,
-            sources,
-            tests,
-            scripts,
-            libraries,
-            remappings,
-            include_paths,
-            allowed_paths,
-            _l: PhantomData,
-        }
+    pub fn with_language<Lang>(self) -> ProjectPathsConfig<Lang> {
+        // SAFETY: `Lang` is `PhantomData`.
+        unsafe { std::mem::transmute(self) }
     }
 
     pub fn apply_lib_remappings(&self, mut libraries: Libraries) -> Libraries {
@@ -633,7 +616,7 @@ impl<L: Language> ProjectPathsConfig<L> {
 
     /// Returns the combined set of `Self::read_sources` + `Self::read_tests` + `Self::read_scripts`
     pub fn read_input_files(&self) -> Result<Sources> {
-        Ok(Source::read_all_files(self.input_files())?)
+        Ok(Source::read_all(self.input_files_iter())?)
     }
 }
 
@@ -1195,5 +1178,40 @@ mod tests {
                 .unwrap(),
             dependency.join("A.sol")
         );
+    }
+
+    #[test]
+    fn can_resolve_single_file_mapped_import() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = ProjectPathsConfig::builder().root(dir.path()).build::<()>().unwrap();
+        config.create_all().unwrap();
+
+        fs::write(
+            config.sources.join("A.sol"),
+            r#"pragma solidity ^0.8.0; import "@my-lib/B.sol"; contract A is B {}"#,
+        )
+        .unwrap();
+
+        let dependency = config.root.join("my-lib");
+        fs::create_dir(&dependency).unwrap();
+        fs::write(dependency.join("B.sol"), r"pragma solidity ^0.8.0; contract B {}").unwrap();
+
+        config.remappings.push(Remapping {
+            context: None,
+            name: "@my-lib/B.sol".into(),
+            path: "my-lib/B.sol".into(),
+        });
+
+        // Test that single file import / remapping resolves to file.
+        assert!(config
+            .resolve_import_and_include_paths(
+                &config.sources,
+                Path::new("@my-lib/B.sol"),
+                &mut Default::default(),
+            )
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with("my-lib/B.sol"));
     }
 }

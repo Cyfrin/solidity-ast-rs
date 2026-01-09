@@ -3,22 +3,20 @@
 //! [EIP-2930]: https://eips.ethereum.org/EIPS/eip-2930
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[allow(unused_imports)]
-#[macro_use]
 extern crate alloc;
 
-#[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
-
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use core::{mem, ops::Deref};
+
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, RlpDecodable, RlpEncodable)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
     pub address: Address,
@@ -29,7 +27,7 @@ pub struct AccessListItem {
 impl AccessListItem {
     /// Calculates a heuristic for the in-memory size of the [AccessListItem].
     #[inline]
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         mem::size_of::<Address>() + self.storage_keys.capacity() * mem::size_of::<B256>()
     }
 }
@@ -38,6 +36,7 @@ impl AccessListItem {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, RlpDecodableWrapper, RlpEncodableWrapper)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct AccessList(pub Vec<AccessListItem>);
 
 impl From<Vec<AccessListItem>> for AccessList {
@@ -96,6 +95,11 @@ impl AccessList {
         self.iter().position(|item| item.address == address)
     }
 
+    /// Returns the total number of storage keys in this access list.
+    pub fn storage_keys_count(&self) -> usize {
+        self.iter().map(|i| i.storage_keys.len()).sum::<usize>()
+    }
+
     /// Checks if a specific storage slot within an account is present in the access list.
     ///
     /// Returns a tuple with flags for the presence of the account and the slot.
@@ -112,9 +116,7 @@ impl AccessList {
     /// Checks if the storage keys at the given index within an account are present in the access
     /// list.
     fn contains_storage_key_at_index(&self, slot: B256, index: usize) -> bool {
-        self.get(index).map_or(false, |entry| {
-            entry.storage_keys.iter().any(|storage_key| *storage_key == slot)
-        })
+        self.get(index).is_some_and(|entry| entry.storage_keys.contains(&slot))
     }
 
     /// Adds an address to the access list and returns `true` if the operation results in a change,
@@ -139,6 +141,7 @@ impl AccessList {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct AccessListWithGasUsed {
     /// List with accounts accessed during transaction.
     pub access_list: AccessList,
@@ -150,6 +153,7 @@ pub struct AccessListWithGasUsed {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 pub struct AccessListResult {
     /// List with accounts accessed during transaction.
     pub access_list: AccessList,

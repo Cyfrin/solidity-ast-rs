@@ -30,30 +30,24 @@ static OLD_SOLC_RELEASES: LazyLock<Releases> = LazyLock::new(|| {
 
 const LINUX_AARCH64_MIN: Version = Version::new(0, 5, 0);
 
-static LINUX_AARCH64_URL_PREFIX: &str =
-    "https://raw.githubusercontent.com/nikitastupin/solc/77e67befc2c7b8f328c543aa9e3ff4b34bde9b77/linux/aarch64";
+static LINUX_AARCH64_URL_PREFIX: &str = "https://raw.githubusercontent.com/nikitastupin/solc/2287d4326237172acf91ce42fd7ec18a67b7f512/linux/aarch64";
 
-static LINUX_AARCH64_RELEASES_URL: &str =
-    "https://raw.githubusercontent.com/nikitastupin/solc/77e67befc2c7b8f328c543aa9e3ff4b34bde9b77/linux/aarch64/list.json";
+static LINUX_AARCH64_RELEASES_URL: &str = "https://raw.githubusercontent.com/nikitastupin/solc/2287d4326237172acf91ce42fd7ec18a67b7f512/linux/aarch64/list.json";
 
 // NOTE: Since version 0.8.24, universal macosx releases are available: https://binaries.soliditylang.org/macosx-amd64/list.json
 const MACOS_AARCH64_NATIVE: Version = Version::new(0, 8, 5);
 
 const UNIVERSAL_MACOS_BINARIES: Version = Version::new(0, 8, 24);
 
-static MACOS_AARCH64_URL_PREFIX: &str =
-    "https://raw.githubusercontent.com/alloy-rs/solc-builds/e4b80d33bc4d015b2fc3583e217fbf248b2014e1/macosx/aarch64";
+static MACOS_AARCH64_URL_PREFIX: &str = "https://raw.githubusercontent.com/alloy-rs/solc-builds/e4b80d33bc4d015b2fc3583e217fbf248b2014e1/macosx/aarch64";
 
-static MACOS_AARCH64_RELEASES_URL: &str =
-    "https://raw.githubusercontent.com/alloy-rs/solc-builds/e4b80d33bc4d015b2fc3583e217fbf248b2014e1/macosx/aarch64/list.json";
+static MACOS_AARCH64_RELEASES_URL: &str = "https://raw.githubusercontent.com/alloy-rs/solc-builds/e4b80d33bc4d015b2fc3583e217fbf248b2014e1/macosx/aarch64/list.json";
 
 const ANDROID_AARCH64_MIN: Version = Version::new(0, 8, 24);
 
-static ANDROID_AARCH64_URL_PREFIX: &str =
-    "https://raw.githubusercontent.com/alloy-rs/solc-builds/5a404a4839fdde4a6093aee1b3d75a8dce38f40f/android/aarch64";
+static ANDROID_AARCH64_URL_PREFIX: &str = "https://raw.githubusercontent.com/alloy-rs/solc-builds/ac6f303a04b38e7ec507ced511fd3ed7a605179f/android/aarch64";
 
-static ANDROID_AARCH64_RELEASES_URL: &str =
-    "https://raw.githubusercontent.com/alloy-rs/solc-builds/5a404a4839fdde4a6093aee1b3d75a8dce38f40f/android/aarch64/list.json";
+static ANDROID_AARCH64_RELEASES_URL: &str = "https://raw.githubusercontent.com/alloy-rs/solc-builds/ac6f303a04b38e7ec507ced511fd3ed7a605179f/android/aarch64/list.json";
 
 /// Defines the struct that the JSON-formatted release list can be deserialized into.
 ///
@@ -82,18 +76,42 @@ pub struct Releases {
 
 impl Releases {
     /// Get the checksum of a solc version's binary if it exists.
+    /// Checks for exact version match or for prerelease.
     pub fn get_checksum(&self, v: &Version) -> Option<Vec<u8>> {
-        for build in self.builds.iter() {
-            if build.version.eq(v) {
-                return Some(build.sha256.clone());
-            }
-        }
-        None
+        let matches = |build_info: &BuildInfo| {
+            build_info.version == Version::new(v.major, v.minor, v.patch)
+                && build_info
+                    .prerelease
+                    .as_deref()
+                    .unwrap_or("")
+                    .eq_ignore_ascii_case(v.pre.as_str())
+        };
+
+        self.builds
+            .iter()
+            .find(|build_info| matches(build_info))
+            .map(|build_info| build_info.sha256.clone())
     }
 
-    /// Returns the artifact of the version if any
+    /// Returns the artifact of the version if any, by looking it up in releases or in builds (if
+    /// a prerelease).
     pub fn get_artifact(&self, version: &Version) -> Option<&String> {
-        self.releases.get(version)
+        // Check version artifact in releases.
+        if let Some(artifact) = self.releases.get(version) {
+            return Some(artifact);
+        }
+
+        // If we didn't find any artifact under releases, look up builds for prerelease.
+        if !version.pre.is_empty()
+            && let Some(build_info) = self.builds.iter().find(|b| {
+                b.version == Version::new(version.major, version.minor, version.patch)
+                    && b.prerelease == Some(version.pre.to_string())
+            })
+        {
+            return build_info.path.as_ref();
+        }
+
+        None
     }
 
     /// Returns a sorted list of all versions
@@ -110,12 +128,14 @@ pub struct BuildInfo {
     pub version: Version,
     #[serde(with = "hex_string")]
     pub sha256: Vec<u8>,
+    pub path: Option<String>,
+    pub prerelease: Option<String>,
 }
 
 /// Helper serde module to serialize and deserialize bytes as hex.
 mod hex_string {
     use super::*;
-    use serde::{de, Deserializer, Serializer};
+    use serde::{Deserializer, Serializer, de};
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
     where
@@ -172,6 +192,16 @@ pub fn blocking_all_releases(platform: Platform) -> Result<Releases, SvmError> {
         Platform::AndroidAarch64 => {
             Ok(reqwest::blocking::get(ANDROID_AARCH64_RELEASES_URL)?.json::<Releases>()?)
         }
+        Platform::WindowsAarch64 => {
+            // Windows ARM64 uses x64 binaries via emulation
+            // Solidity does not provide native ARM64 Windows binaries
+            let releases = reqwest::blocking::get(format!(
+                "{SOLC_RELEASES_URL}/{}/list.json",
+                Platform::WindowsAmd64
+            ))?
+            .json::<Releases>()?;
+            Ok(unified_releases(releases, platform))
+        }
         _ => {
             let releases =
                 reqwest::blocking::get(format!("{SOLC_RELEASES_URL}/{platform}/list.json"))?
@@ -223,6 +253,19 @@ pub async fn all_releases(platform: Platform) -> Result<Releases, SvmError> {
             .await?
             .json::<Releases>()
             .await?),
+        Platform::WindowsAarch64 => {
+            // Windows ARM64 uses x64 binaries via emulation
+            // Solidity does not provide native ARM64 Windows binaries
+            let releases = get(format!(
+                "{SOLC_RELEASES_URL}/{}/list.json",
+                Platform::WindowsAmd64
+            ))
+            .await?
+            .json::<Releases>()
+            .await?;
+
+            Ok(unified_releases(releases, platform))
+        }
         _ => {
             let releases = get(format!("{SOLC_RELEASES_URL}/{platform}/list.json"))
                 .await?
@@ -311,6 +354,15 @@ pub(crate) fn artifact_url(
         }
     }
 
+    if platform == Platform::WindowsAarch64 {
+        // Windows ARM64 uses x64 binaries via emulation
+        // Solidity does not provide native ARM64 Windows binaries
+        return Ok(Url::parse(&format!(
+            "{SOLC_RELEASES_URL}/{}/{artifact}",
+            Platform::WindowsAmd64,
+        ))?);
+    }
+
     Ok(Url::parse(&format!(
         "{SOLC_RELEASES_URL}/{platform}/{artifact}"
     ))?)
@@ -327,7 +379,7 @@ mod tests {
         assert_eq!(
             artifact_url(Platform::LinuxAarch64, &version, artifact).unwrap(),
             Url::parse(&format!(
-                "https://raw.githubusercontent.com/nikitastupin/solc/77e67befc2c7b8f328c543aa9e3ff4b34bde9b77/linux/aarch64/{artifact}"
+                "https://raw.githubusercontent.com/nikitastupin/solc/2287d4326237172acf91ce42fd7ec18a67b7f512/linux/aarch64/{artifact}"
             ))
             .unwrap(),
         )
@@ -380,6 +432,18 @@ mod tests {
     #[tokio::test]
     async fn test_all_releases_linux_aarch64() {
         assert!(all_releases(Platform::LinuxAarch64).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_all_releases_windows_aarch64() {
+        let releases = all_releases(Platform::WindowsAarch64).await;
+        assert!(releases.is_ok());
+        // Check also that we got the windows-amd64 release
+        let releases = releases.unwrap();
+        let latest = releases.releases.keys().max().unwrap();
+        let artifact = releases.get_artifact(latest).unwrap();
+        let url = artifact_url(Platform::WindowsAarch64, latest, artifact).unwrap();
+        assert!(url.to_string().contains("windows-amd64"));
     }
 
     #[tokio::test]

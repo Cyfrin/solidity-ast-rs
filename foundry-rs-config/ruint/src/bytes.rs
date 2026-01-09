@@ -1,6 +1,3 @@
-// OPT: Use u64::from_{be/le}_bytes() to work 8 bytes at a time.
-// FEATURE: (BLOCKED) Make `const fn`s when `const_for` is stable.
-
 use crate::Uint;
 use core::slice;
 
@@ -12,7 +9,7 @@ use alloc::{borrow::Cow, vec::Vec};
 impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     /// The size of this integer type in bytes. Note that some bits may be
     /// forced zero if BITS is not cleanly divisible by eight.
-    pub const BYTES: usize = (BITS + 7) / 8;
+    pub const BYTES: usize = BITS.div_ceil(8);
 
     /// Access the underlying store as a little-endian slice of bytes.
     ///
@@ -39,7 +36,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[cfg(target_endian = "little")]
     #[must_use]
     #[inline(always)]
-    pub unsafe fn as_le_slice_mut(&mut self) -> &mut [u8] {
+    pub const unsafe fn as_le_slice_mut(&mut self) -> &mut [u8] {
         unsafe { slice::from_raw_parts_mut(self.limbs.as_mut_ptr().cast(), Self::BYTES) }
     }
 
@@ -49,7 +46,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[cfg(feature = "alloc")]
     #[must_use]
     #[inline]
-    #[allow(clippy::missing_const_for_fn)]
+    #[cfg_attr(target_endian = "little", allow(clippy::missing_const_for_fn))] // Not const in big-endian.
     pub fn as_le_bytes(&self) -> Cow<'_, [u8]> {
         // On little endian platforms this is a no-op.
         #[cfg(target_endian = "little")]
@@ -58,11 +55,11 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
         // In others, reverse each limb and return a copy.
         #[cfg(target_endian = "big")]
         return Cow::Owned({
-            let mut cpy = *self;
-            for limb in &mut cpy.limbs {
+            let mut limbs = self.limbs;
+            for limb in &mut limbs {
                 *limb = limb.swap_bytes();
             }
-            unsafe { slice::from_raw_parts(cpy.limbs.as_ptr().cast(), Self::BYTES).to_vec() }
+            unsafe { slice::from_raw_parts(limbs.as_ptr().cast(), Self::BYTES).to_vec() }
         });
     }
 
@@ -96,8 +93,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[inline]
     #[must_use]
     pub const fn to_le_bytes<const BYTES: usize>(&self) -> [u8; BYTES] {
-        // TODO: Use a `const {}` block for this assertion
-        assert!(BYTES == Self::BYTES, "BYTES must be equal to Self::BYTES");
+        const { Self::assert_bytes(BYTES) }
 
         // Specialized impl
         #[cfg(target_endian = "little")]
@@ -209,15 +205,14 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[track_caller]
     #[inline]
     pub const fn from_be_bytes<const BYTES: usize>(bytes: [u8; BYTES]) -> Self {
-        // TODO: Use a `const {}` block for this assertion
-        assert!(BYTES == Self::BYTES, "BYTES must be equal to Self::BYTES");
+        const { Self::assert_bytes(BYTES) }
         Self::from_be_slice(&bytes)
     }
 
     /// Creates a new integer from a big endian slice of bytes.
     ///
-    /// The slice is interpreted as a big endian number. Leading zeros
-    /// are ignored. The slice can be any length.
+    /// The slice is interpreted as a big endian number, and must be at most
+    /// [`Self::BYTES`] long.
     ///
     /// # Panics
     ///
@@ -234,8 +229,8 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
 
     /// Creates a new integer from a big endian slice of bytes.
     ///
-    /// The slice is interpreted as a big endian number. Leading zeros
-    /// are ignored. The slice can be any length.
+    /// The slice is interpreted as a big endian number, and must be at most
+    /// [`Self::BYTES`] long.
     ///
     /// Returns [`None`] if the value is larger than fits the [`Uint`].
     #[must_use]
@@ -262,10 +257,11 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
         let mut c = bytes.len();
         while i < bytes.len() {
             c -= 1;
-            limbs[i / 8] += (bytes[c] as u64) << ((i % 8) * 8);
+            let (limb, byte) = (i / 8, i % 8);
+            limbs[limb] += (bytes[c] as u64) << (byte * 8);
             i += 1;
         }
-        if Self::LIMBS > 0 && limbs[Self::LIMBS - 1] > Self::MASK {
+        if LIMBS > 0 && limbs[LIMBS - 1] > Self::MASK {
             return None;
         }
         Some(Self::from_limbs(limbs))
@@ -287,15 +283,14 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[track_caller]
     #[inline]
     pub const fn from_le_bytes<const BYTES: usize>(bytes: [u8; BYTES]) -> Self {
-        // TODO: Use a `const {}` block for this assertion
-        assert!(BYTES == Self::BYTES, "BYTES must be equal to Self::BYTES");
+        const { Self::assert_bytes(BYTES) }
         Self::from_le_slice(&bytes)
     }
 
     /// Creates a new integer from a little endian slice of bytes.
     ///
-    /// The slice is interpreted as a little endian number. Leading zeros
-    /// are ignored. The slice can be any length.
+    /// The slice is interpreted as a little endian number, and must be at most
+    /// [`Self::BYTES`] long.
     ///
     /// # Panics
     ///
@@ -312,14 +307,14 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
 
     /// Creates a new integer from a little endian slice of bytes.
     ///
-    /// The slice is interpreted as a little endian number. Leading zeros
-    /// are ignored. The slice can be any length.
+    /// The slice is interpreted as a little endian number, and must be at most
+    /// [`Self::BYTES`] long.
     ///
     /// Returns [`None`] if the value is larger than fits the [`Uint`].
     #[must_use]
     #[inline]
     pub const fn try_from_le_slice(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() / 8 > Self::LIMBS {
+        if bytes.len() > Self::BYTES {
             return None;
         }
 
@@ -337,10 +332,11 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
         let mut limbs = [0; LIMBS];
         let mut i = 0;
         while i < bytes.len() {
-            limbs[i / 8] += (bytes[i] as u64) << ((i % 8) * 8);
+            let (limb, byte) = (i / 8, i % 8);
+            limbs[limb] += (bytes[i] as u64) << (byte * 8);
             i += 1;
         }
-        if Self::LIMBS > 0 && limbs[Self::LIMBS - 1] > Self::MASK {
+        if LIMBS > 0 && limbs[LIMBS - 1] > Self::MASK {
             return None;
         }
         Some(Self::from_limbs(limbs))
@@ -451,6 +447,11 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
 
         Some(self.copy_be_bytes_to(buf))
     }
+
+    #[track_caller]
+    const fn assert_bytes(bytes: usize) {
+        assert!(bytes == Self::BYTES, "BYTES must be equal to Self::BYTES");
+    }
 }
 
 /// Number of bytes required to represent the given number of bits.
@@ -461,7 +462,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
 #[inline]
 #[must_use]
 pub const fn nbytes(bits: usize) -> usize {
-    (bits + 7) / 8
+    bits.div_ceil(8)
 }
 
 #[cfg(test)]
@@ -561,10 +562,32 @@ mod tests {
             Uint::<16, 1>::from_le_bytes([0x34, 0x12]),
             Uint::from(0x1234)
         );
+
         assert_eq!(Uint::from_be_bytes(BE), N);
         assert_eq!(Uint::from_le_bytes(LE), N);
         assert_eq!(Uint::from_be_bytes(KBE), K);
         assert_eq!(Uint::from_le_bytes(KLE), K);
+
+        assert_eq!(Uint::<128, 2>::try_from_be_slice(&BE), Some(N));
+        assert_eq!(
+            Uint::<128, 2>::try_from_be_slice(&[&BE[..], &[0xff][..]].concat()),
+            None
+        );
+        assert_eq!(Uint::<128, 2>::try_from_le_slice(&LE), Some(N));
+        assert_eq!(
+            Uint::<128, 2>::try_from_le_slice(&[&LE[..], &[0xff]].concat()),
+            None
+        );
+        assert_eq!(Uint::<72, 2>::try_from_be_slice(&KBE), Some(K));
+        assert_eq!(
+            Uint::<72, 2>::try_from_be_slice(&[&KBE[..], &[0xff][..]].concat()),
+            None
+        );
+        assert_eq!(Uint::<72, 2>::try_from_le_slice(&KLE), Some(K));
+        assert_eq!(
+            Uint::<72, 2>::try_from_le_slice(&[&KLE[..], &[0xff]].concat()),
+            None
+        );
     }
 
     #[test]

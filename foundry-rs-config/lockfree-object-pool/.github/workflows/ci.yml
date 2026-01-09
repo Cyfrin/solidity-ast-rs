@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  schedule:
+  - cron: "0 2 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y -qq
+
+      - name: Run cargo check
+        run: cargo check
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y -qq
+
+      - name: Run cargo test
+        run: cargo test --verbose
+
+  clippy:
+    name: Lint with clippy
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -Dwarnings
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y -qq
+        
+      - name: Run cargo clippy
+        run: cargo clippy --workspace --all-targets --verbose -- -A dead-code
+
+  rustfmt:
+    name: Verify code formatting
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -Dwarnings
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y -qq
+
+      - name: Run cargo clippy
+        run: cargo fmt --all -- --check

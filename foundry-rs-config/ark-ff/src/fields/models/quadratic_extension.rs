@@ -1,29 +1,25 @@
+use crate::{
+    biginteger::BigInteger,
+    fields::{Field, LegendreSymbol, PrimeField},
+    AdditiveGroup, FftField, One, SqrtPrecomputation, ToConstraintField, UniformRand, Zero,
+};
 use ark_serialize::{
     CanonicalDeserialize, CanonicalDeserializeWithFlags, CanonicalSerialize,
     CanonicalSerializeWithFlags, Compress, EmptyFlags, Flags, SerializationError, Valid, Validate,
 };
 use ark_std::{
-    cmp::{Ord, Ordering, PartialOrd},
+    cmp::*,
     fmt,
     io::{Read, Write},
-    iter::Chain,
+    iter::*,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
-    vec::Vec,
+    rand::{
+        distributions::{Distribution, Standard},
+        Rng,
+    },
+    vec::*,
 };
-
-use num_traits::{One, Zero};
 use zeroize::Zeroize;
-
-use ark_std::rand::{
-    distributions::{Distribution, Standard},
-    Rng,
-};
-
-use crate::{
-    biginteger::BigInteger,
-    fields::{Field, LegendreSymbol, PrimeField},
-    SqrtPrecomputation, ToConstraintField, UniformRand,
-};
 
 /// Defines a Quadratic extension field from a quadratic non-residue.
 pub trait QuadExtConfig: 'static + Send + Sync + Sized {
@@ -35,7 +31,7 @@ pub trait QuadExtConfig: 'static + Send + Sync + Sized {
     /// we might see `BaseField == BasePrimeField`, it won't always hold true.
     /// E.g. for an extension tower: `BasePrimeField == Fp`, but `BaseField == Fp3`.
     type BaseField: Field<BasePrimeField = Self::BasePrimeField>;
-    /// The type of the coefficients for an efficient implemntation of the
+    /// The type of the coefficients for an efficient implementation of the
     /// Frobenius endomorphism.
     type FrobCoeff: Field;
 
@@ -93,16 +89,8 @@ pub trait QuadExtConfig: 'static + Send + Sync + Sized {
 
 /// An element of a quadratic extension field F_p\[X\]/(X^2 - P::NONRESIDUE) is
 /// represented as c0 + c1 * X, for c0, c1 in `P::BaseField`.
-#[derive(Derivative)]
-#[derivative(
-    Default(bound = "P: QuadExtConfig"),
-    Hash(bound = "P: QuadExtConfig"),
-    Clone(bound = "P: QuadExtConfig"),
-    Copy(bound = "P: QuadExtConfig"),
-    Debug(bound = "P: QuadExtConfig"),
-    PartialEq(bound = "P: QuadExtConfig"),
-    Eq(bound = "P: QuadExtConfig")
-)]
+#[derive(Educe)]
+#[educe(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QuadExtField<P: QuadExtConfig> {
     /// Coefficient `c0` in the representation of the field element `c = c0 + c1 * X`
     pub c0: P::BaseField,
@@ -193,42 +181,10 @@ impl<P: QuadExtConfig> One for QuadExtField<P> {
     }
 }
 
-type BaseFieldIter<P> = <<P as QuadExtConfig>::BaseField as Field>::BasePrimeFieldIter;
-impl<P: QuadExtConfig> Field for QuadExtField<P> {
-    type BasePrimeField = P::BasePrimeField;
-
-    type BasePrimeFieldIter = Chain<BaseFieldIter<P>, BaseFieldIter<P>>;
-
-    const SQRT_PRECOMP: Option<SqrtPrecomputation<Self>> = None;
+impl<P: QuadExtConfig> AdditiveGroup for QuadExtField<P> {
+    type Scalar = Self;
 
     const ZERO: Self = Self::new(P::BaseField::ZERO, P::BaseField::ZERO);
-    const ONE: Self = Self::new(P::BaseField::ONE, P::BaseField::ZERO);
-
-    fn extension_degree() -> u64 {
-        2 * P::BaseField::extension_degree()
-    }
-
-    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
-        let fe = P::BaseField::from_base_prime_field(elem);
-        Self::new(fe, P::BaseField::ZERO)
-    }
-
-    fn to_base_prime_field_elements(&self) -> Self::BasePrimeFieldIter {
-        self.c0
-            .to_base_prime_field_elements()
-            .chain(self.c1.to_base_prime_field_elements())
-    }
-
-    fn from_base_prime_field_elems(elems: &[Self::BasePrimeField]) -> Option<Self> {
-        if elems.len() != (Self::extension_degree() as usize) {
-            return None;
-        }
-        let base_ext_deg = P::BaseField::extension_degree() as usize;
-        Some(Self::new(
-            P::BaseField::from_base_prime_field_elems(&elems[0..base_ext_deg]).unwrap(),
-            P::BaseField::from_base_prime_field_elems(&elems[base_ext_deg..]).unwrap(),
-        ))
-    }
 
     fn double(&self) -> Self {
         let mut result = *self;
@@ -246,6 +202,46 @@ impl<P: QuadExtConfig> Field for QuadExtField<P> {
         self.c0.neg_in_place();
         self.c1.neg_in_place();
         self
+    }
+}
+
+impl<P: QuadExtConfig> Field for QuadExtField<P> {
+    type BasePrimeField = P::BasePrimeField;
+
+    const SQRT_PRECOMP: Option<SqrtPrecomputation<Self>> = None;
+
+    const ONE: Self = Self::new(P::BaseField::ONE, P::BaseField::ZERO);
+
+    fn extension_degree() -> u64 {
+        2 * P::BaseField::extension_degree()
+    }
+
+    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
+        let fe = P::BaseField::from_base_prime_field(elem);
+        Self::new(fe, P::BaseField::ZERO)
+    }
+
+    fn to_base_prime_field_elements(&self) -> impl Iterator<Item = Self::BasePrimeField> {
+        self.c0
+            .to_base_prime_field_elements()
+            .chain(self.c1.to_base_prime_field_elements())
+    }
+
+    fn from_base_prime_field_elems(
+        elems: impl IntoIterator<Item = Self::BasePrimeField>,
+    ) -> Option<Self> {
+        let mut elems = elems.into_iter();
+        let elems = elems.by_ref();
+        let base_ext_deg = P::BaseField::extension_degree() as usize;
+        let element = Some(Self::new(
+            P::BaseField::from_base_prime_field_elems(elems.take(base_ext_deg))?,
+            P::BaseField::from_base_prime_field_elems(elems.take(base_ext_deg))?,
+        ));
+        if elems.next().is_some() {
+            None
+        } else {
+            element
+        }
     }
 
     fn square(&self) -> Self {
@@ -439,6 +435,13 @@ impl<P: QuadExtConfig> Field for QuadExtField<P> {
             *self = sqrt;
             self
         })
+    }
+
+    fn mul_by_base_prime_field(&self, elem: &Self::BasePrimeField) -> Self {
+        let mut result = *self;
+        result.c0 = result.c0.mul_by_base_prime_field(elem);
+        result.c1 = result.c1.mul_by_base_prime_field(elem);
+        result
     }
 }
 
@@ -772,8 +775,8 @@ mod quad_ext_tests {
     use super::*;
     use ark_std::test_rng;
     use ark_test_curves::{
+        ark_ff::Field,
         bls12_381::{Fq, Fq2},
-        Field,
     };
 
     #[test]
@@ -789,7 +792,7 @@ mod quad_ext_tests {
             for _ in 0..d {
                 random_coeffs.push(Fq::rand(&mut test_rng()));
             }
-            let res = Fq2::from_base_prime_field_elems(&random_coeffs);
+            let res = Fq2::from_base_prime_field_elems(random_coeffs);
             assert_eq!(res, None);
         }
         // Test on slice lengths that are equal to the extension degree
@@ -800,8 +803,8 @@ mod quad_ext_tests {
             for _ in 0..ext_degree {
                 random_coeffs.push(Fq::rand(&mut test_rng()));
             }
-            let actual = Fq2::from_base_prime_field_elems(&random_coeffs).unwrap();
             let expected = Fq2::new(random_coeffs[0], random_coeffs[1]);
+            let actual = Fq2::from_base_prime_field_elems(random_coeffs).unwrap();
             assert_eq!(actual, expected);
         }
     }
@@ -817,8 +820,26 @@ mod quad_ext_tests {
             random_coeffs[0] = random_coeff;
             assert_eq!(
                 res,
-                Fq2::from_base_prime_field_elems(&random_coeffs).unwrap()
+                Fq2::from_base_prime_field_elems(random_coeffs).unwrap()
             );
         }
     }
+}
+
+impl<P: QuadExtConfig> FftField for QuadExtField<P>
+where
+    P::BaseField: FftField,
+{
+    const GENERATOR: Self = Self::new(P::BaseField::GENERATOR, P::BaseField::ZERO);
+    const TWO_ADICITY: u32 = P::BaseField::TWO_ADICITY;
+    const TWO_ADIC_ROOT_OF_UNITY: Self =
+        Self::new(P::BaseField::TWO_ADIC_ROOT_OF_UNITY, P::BaseField::ZERO);
+    const SMALL_SUBGROUP_BASE: Option<u32> = P::BaseField::SMALL_SUBGROUP_BASE;
+    const SMALL_SUBGROUP_BASE_ADICITY: Option<u32> = P::BaseField::SMALL_SUBGROUP_BASE_ADICITY;
+    const LARGE_SUBGROUP_ROOT_OF_UNITY: Option<Self> =
+        if let Some(x) = P::BaseField::LARGE_SUBGROUP_ROOT_OF_UNITY {
+            Some(Self::new(x, P::BaseField::ZERO))
+        } else {
+            None
+        };
 }

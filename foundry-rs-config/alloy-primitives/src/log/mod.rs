@@ -1,4 +1,4 @@
-use crate::{Address, Bloom, Bytes, B256};
+use crate::{Address, B256, Bloom, Bytes};
 use alloc::vec::Vec;
 
 #[cfg(feature = "serde")]
@@ -16,7 +16,7 @@ pub fn logs_bloom<'a>(logs: impl IntoIterator<Item = &'a Log>) -> Bloom {
 /// An Ethereum event log object.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[cfg_attr(feature = "arbitrary", derive(derive_arbitrary::Arbitrary, proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary, proptest_derive::Arbitrary))]
 pub struct LogData {
     /// The indexed topic list.
     topics: Vec<B256>,
@@ -68,7 +68,7 @@ impl LogData {
     /// Get a mutable reference to the topic list. This allows creation of
     /// invalid logs.
     #[inline]
-    pub fn topics_mut_unchecked(&mut self) -> &mut Vec<B256> {
+    pub const fn topics_mut_unchecked(&mut self) -> &mut Vec<B256> {
         &mut self.topics
     }
 
@@ -115,7 +115,7 @@ impl IntoLogData for LogData {
 
 /// A log consists of an address, and some log data.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(derive_arbitrary::Arbitrary, proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary, proptest_derive::Arbitrary))]
 pub struct Log<T = LogData> {
     /// The address which emitted this log.
     pub address: Address,

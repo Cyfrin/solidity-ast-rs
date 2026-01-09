@@ -4,7 +4,7 @@ use syn::{parse_quote_spanned, spanned::Spanned};
 
 use crate::codegen;
 use crate::options::{Core, DefaultExpression, ParseAttribute};
-use crate::util::{Flag, SpannedValue};
+use crate::util::{Callable, Flag, SpannedValue};
 use crate::{Error, FromMeta, Result};
 
 #[derive(Debug, Clone)]
@@ -13,7 +13,7 @@ pub struct InputField {
     pub attr_name: Option<String>,
     pub ty: syn::Type,
     pub default: Option<DefaultExpression>,
-    pub with: Option<syn::Path>,
+    pub with: Option<Callable>,
 
     /// If `true`, generated code will not look for this field in the input meta item,
     /// instead always falling back to either `InputField::default` or `Default::default`.
@@ -30,11 +30,11 @@ impl InputField {
             ident: &self.ident,
             name_in_attr: self
                 .attr_name
-                .as_ref()
+                .as_deref()
                 .map_or_else(|| Cow::Owned(self.ident.to_string()), Cow::Borrowed),
             ty: &self.ty,
             default_expression: self.as_codegen_default(),
-            with_path: self.with.as_ref().map_or_else(
+            with_callable: self.with.as_ref().map(|w| w.as_ref()).map_or_else(
                 || {
                     Cow::Owned(
                         parse_quote_spanned!(self.ty.span()=> ::darling::FromMeta::from_meta),

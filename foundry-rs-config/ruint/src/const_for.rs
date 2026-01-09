@@ -42,7 +42,7 @@
 /// ```
 #[macro_export]
 macro_rules! const_for {
-    ($C:ident in [ $( $n:literal ),* ] $x:block) => {
+    ($C:ident in [$($n:expr),*] $x:block) => {
         $({
             const $C: usize = $n;
             $x
@@ -56,13 +56,11 @@ macro_rules! const_for {
         $crate::const_for!($C in [1, 2, 63, 64, 65, 127, 128, 129, 256, 384, 512, 4096] $x);
     };
     ($C:ident in BENCH $x:block) => {
-        $crate::const_for!($C in [0, 64, 128, 192, 256, 384, 512, 4096] $x);
+        $crate::const_for!($C in [64, 128, 192, 256, 384, 512, 4096] $x);
     };
-    ($C:ident in $S:ident if ( $c:expr ) $x:block) => {
+    ($C:ident in $S:tt if $($t:tt)*) => {
         $crate::const_for!($C in $S {
-            if $c {
-                $x
-            }
+            if $($t)*
         });
     };
 }

@@ -5,12 +5,22 @@ use crate::location::LineColumn;
 use crate::parse::{self, Cursor};
 use crate::rcvec::{RcVec, RcVecBuilder, RcVecIntoIter, RcVecMut};
 use crate::{Delimiter, Spacing, TokenTree};
+use alloc::borrow::ToOwned as _;
+use alloc::boxed::Box;
 #[cfg(all(span_locations, not(fuzzing)))]
 use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::string::{String, ToString as _};
+#[cfg(all(span_locations, not(fuzzing)))]
+use alloc::vec;
+use alloc::vec::Vec;
 #[cfg(all(span_locations, not(fuzzing)))]
 use core::cell::RefCell;
 #[cfg(span_locations)]
 use core::cmp;
+#[cfg(all(span_locations, not(fuzzing)))]
+use core::cmp::Ordering;
+use core::ffi::CStr;
 use core::fmt::{self, Debug, Display, Write};
 use core::mem::ManuallyDrop;
 #[cfg(span_locations)]
@@ -20,11 +30,12 @@ use core::ptr;
 use core::str;
 #[cfg(feature = "proc-macro")]
 use core::str::FromStr;
-use std::ffi::CStr;
 #[cfg(wrap_proc_macro)]
 use std::panic;
-#[cfg(procmacro2_semver_exempt)]
+#[cfg(span_locations)]
 use std::path::PathBuf;
+#[cfg(all(span_locations, not(fuzzing)))]
+use std::thread_local;
 
 /// Force use of proc-macro2's fallback implementation of the API for now, even
 /// if the compiler's implementation is available.
@@ -220,13 +231,13 @@ impl Display for TokenStream {
             }
             joint = false;
             match tt {
-                TokenTree::Group(tt) => Display::fmt(tt, f),
-                TokenTree::Ident(tt) => Display::fmt(tt, f),
+                TokenTree::Group(tt) => write!(f, "{}", tt),
+                TokenTree::Ident(tt) => write!(f, "{}", tt),
                 TokenTree::Punct(tt) => {
                     joint = tt.spacing() == Spacing::Joint;
-                    Display::fmt(tt, f)
+                    write!(f, "{}", tt)
                 }
-                TokenTree::Literal(tt) => Display::fmt(tt, f),
+                TokenTree::Literal(tt) => write!(f, "{}", tt),
             }?;
         }
 
@@ -308,34 +319,6 @@ impl IntoIterator for TokenStream {
 
     fn into_iter(self) -> TokenTreeIter {
         self.take_inner().into_iter()
-    }
-}
-
-#[cfg(procmacro2_semver_exempt)]
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct SourceFile {
-    path: PathBuf,
-}
-
-#[cfg(procmacro2_semver_exempt)]
-impl SourceFile {
-    /// Get the path to this source file as a string.
-    pub(crate) fn path(&self) -> PathBuf {
-        self.path.clone()
-    }
-
-    pub(crate) fn is_real(&self) -> bool {
-        false
-    }
-}
-
-#[cfg(procmacro2_semver_exempt)]
-impl Debug for SourceFile {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("SourceFile")
-            .field("path", &self.path())
-            .field("is_real", &self.is_real())
-            .finish()
     }
 }
 
@@ -483,36 +466,39 @@ impl SourceMap {
         span
     }
 
-    #[cfg(procmacro2_semver_exempt)]
-    fn filepath(&self, span: Span) -> PathBuf {
-        for (i, file) in self.files.iter().enumerate() {
-            if file.span_within(span) {
-                return PathBuf::from(if i == 0 {
-                    "<unspecified>".to_owned()
-                } else {
-                    format!("<parsed string {}>", i)
-                });
+    fn find(&self, span: Span) -> usize {
+        match self.files.binary_search_by(|file| {
+            if file.span.hi < span.lo {
+                Ordering::Less
+            } else if file.span.lo > span.hi {
+                Ordering::Greater
+            } else {
+                assert!(file.span_within(span));
+                Ordering::Equal
             }
+        }) {
+            Ok(i) => i,
+            Err(_) => unreachable!("Invalid span with no related FileInfo!"),
         }
-        unreachable!("Invalid span with no related FileInfo!");
+    }
+
+    fn filepath(&self, span: Span) -> String {
+        let i = self.find(span);
+        if i == 0 {
+            "<unspecified>".to_owned()
+        } else {
+            format!("<parsed string {}>", i)
+        }
     }
 
     fn fileinfo(&self, span: Span) -> &FileInfo {
-        for file in &self.files {
-            if file.span_within(span) {
-                return file;
-            }
-        }
-        unreachable!("Invalid span with no related FileInfo!");
+        let i = self.find(span);
+        &self.files[i]
     }
 
     fn fileinfo_mut(&mut self, span: Span) -> &mut FileInfo {
-        for file in &mut self.files {
-            if file.span_within(span) {
-                return file;
-            }
-        }
-        unreachable!("Invalid span with no related FileInfo!");
+        let i = self.find(span);
+        &mut self.files[i]
     }
 }
 
@@ -555,21 +541,6 @@ impl Span {
         other
     }
 
-    #[cfg(procmacro2_semver_exempt)]
-    pub(crate) fn source_file(&self) -> SourceFile {
-        #[cfg(fuzzing)]
-        return SourceFile {
-            path: PathBuf::from("<unspecified>"),
-        };
-
-        #[cfg(not(fuzzing))]
-        SOURCE_MAP.with(|sm| {
-            let sm = sm.borrow();
-            let path = sm.filepath(*self);
-            SourceFile { path }
-        })
-    }
-
     #[cfg(span_locations)]
     pub(crate) fn byte_range(&self) -> Range<usize> {
         #[cfg(fuzzing)]
@@ -609,6 +580,23 @@ impl Span {
             let fi = sm.fileinfo(*self);
             fi.offset_line_column(self.hi as usize)
         })
+    }
+
+    #[cfg(span_locations)]
+    pub(crate) fn file(&self) -> String {
+        #[cfg(fuzzing)]
+        return "<unspecified>".to_owned();
+
+        #[cfg(not(fuzzing))]
+        SOURCE_MAP.with(|sm| {
+            let sm = sm.borrow();
+            sm.filepath(*self)
+        })
+    }
+
+    #[cfg(span_locations)]
+    pub(crate) fn local_file(&self) -> Option<PathBuf> {
+        None
     }
 
     #[cfg(not(span_locations))]
@@ -910,7 +898,7 @@ impl Display for Ident {
         if self.raw {
             f.write_str("r#")?;
         }
-        Display::fmt(&self.sym, f)
+        f.write_str(&self.sym)
     }
 }
 

@@ -304,17 +304,7 @@ impl BytecodeObject {
     /// See also: <https://docs.soliditylang.org/en/develop/using-the-compiler.html#library-linking>
     pub fn link_fully_qualified(&mut self, name: &str, addr: Address) -> &mut Self {
         if let Self::Unlinked(unlinked) = self {
-            let place_holder = utils::library_hash_placeholder(name);
-            // the address as hex without prefix
-            let hex_addr = hex::encode(addr);
-
-            // the library placeholder used to be the fully qualified name of the library instead of
-            // the hash. This is also still supported by `solc` so we handle this as well
-            let fully_qualified_placeholder = utils::library_fully_qualified_placeholder(name);
-
-            *unlinked = unlinked
-                .replace(&format!("__{fully_qualified_placeholder}__"), &hex_addr)
-                .replace(&format!("__{place_holder}__"), &hex_addr)
+            link(unlinked, name, addr);
         }
         self
     }
@@ -353,6 +343,21 @@ impl BytecodeObject {
     pub fn contains_placeholder(&self, file: &str, library: &str) -> bool {
         self.contains_fully_qualified_placeholder(&format!("{file}:{library}"))
     }
+
+    /// Strips all __$xxx$__ placeholders from the bytecode if it's an unlinked bytecode.
+    /// by replacing them with 20 zero bytes.
+    /// This is useful for matching bytecodes to a contract source, and for the source map,
+    /// in which the actual address of the placeholder isn't important.
+    pub fn strip_bytecode_placeholders(&self) -> Option<Bytes> {
+        match &self {
+            Self::Bytecode(bytes) => Some(bytes.clone()),
+            Self::Unlinked(s) => {
+                // Replace all __$xxx$__ placeholders with 32 zero bytes
+                let bytes = replace_placeholders_and_decode(s).ok()?;
+                Some(bytes.into())
+            }
+        }
+    }
 }
 
 // Returns an empty bytecode object
@@ -371,6 +376,43 @@ impl AsRef<[u8]> for BytecodeObject {
     }
 }
 
+/// Reference: <https://github.com/argotorg/solidity/blob/965166317bbc2b02067eb87f222a2dce9d24e289/libevmasm/LinkerObject.cpp#L38>
+fn link(unlinked: &mut String, name: &str, addr: Address) {
+    const LEN: usize = 40;
+
+    let mut refs = vec![];
+    let mut find = |needle: &str| {
+        assert_eq!(needle.len(), LEN, "{needle:?}");
+        refs.extend(memchr::memmem::find_iter(unlinked.as_bytes(), needle));
+    };
+
+    let placeholder = utils::library_hash_placeholder(name);
+    find(&format!("__{placeholder}__"));
+
+    // The library placeholder used to be the fully qualified name of the library instead of
+    // the hash. This is also still supported by `solc` so we handle this as well.
+    let fully_qualified_placeholder = utils::library_fully_qualified_placeholder(name);
+    find(&format!("__{fully_qualified_placeholder}__"));
+
+    if refs.is_empty() {
+        debug!("no references found while linking {name} -> {addr}");
+        return;
+    }
+
+    // The address as hex without prefix.
+    let mut buffer = hex::Buffer::<20, false>::new();
+    let hex_addr = &*buffer.format(&addr);
+    assert_eq!(hex_addr.len(), LEN, "{hex_addr:?}");
+
+    // The ranges are non-overlapping, so we don't need to sort, and can iterate in whatever order
+    // because of equal lengths.
+    // SAFETY: We're replacing LEN bytes at a time, and all the indexes come from the same string.
+    let unlinked = unsafe { unlinked.as_bytes_mut() };
+    for &idx in &refs {
+        unlinked[idx..idx + LEN].copy_from_slice(hex_addr.as_bytes());
+    }
+}
+
 /// This will serialize the bytecode data without a `0x` prefix, which the `ethers::types::Bytes`
 /// adds by default.
 ///
@@ -386,6 +428,13 @@ where
         BytecodeObject::Bytecode(code) => s.serialize_str(&hex::encode(code)),
         BytecodeObject::Unlinked(code) => s.serialize_str(code.strip_prefix("0x").unwrap_or(code)),
     }
+}
+
+// Replace all __$xxx$__ placeholders with 32 zero bytes
+pub fn replace_placeholders_and_decode(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
+    let re = regex::Regex::new(r"_\$.{34}\$_").expect("invalid regex");
+    let s = re.replace_all(s, "00".repeat(40));
+    hex::decode(s.as_bytes())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -118,6 +118,18 @@ struct IgnoreInner {
     /// The absolute base path of this matcher. Populated only if parent
     /// directories are added.
     absolute_base: Option<Arc<PathBuf>>,
+    /// The directory that gitignores should be interpreted relative to.
+    ///
+    /// Usually this is the directory containing the gitignore file. But in
+    /// some cases, like for global gitignores or for gitignores specified
+    /// explicitly, this should generally be set to the current working
+    /// directory. This is only used for global gitignores or "explicit"
+    /// gitignores.
+    ///
+    /// When `None`, this means the CWD could not be determined or is unknown.
+    /// In this case, global gitignore files are ignored because they otherwise
+    /// cannot be matched correctly.
+    global_gitignores_relative_to: Option<PathBuf>,
     /// Explicit global ignore matchers specified by the caller.
     explicit_ignores: Arc<Vec<Gitignore>>,
     /// Ignore files used in addition to `.ignore`
@@ -212,7 +224,7 @@ impl Ignore {
             igtmp.absolute_base = Some(absolute_base.clone());
             igtmp.has_git =
                 if self.0.opts.require_git && self.0.opts.git_ignore {
-                    parent.join(".git").exists()
+                    parent.join(".git").exists() || parent.join(".jj").exists()
                 } else {
                     false
                 };
@@ -244,14 +256,15 @@ impl Ignore {
 
     /// Like add_child, but takes a full path and returns an IgnoreInner.
     fn add_child_path(&self, dir: &Path) -> (IgnoreInner, Option<Error>) {
-        let git_type = if self.0.opts.require_git
-            && (self.0.opts.git_ignore || self.0.opts.git_exclude)
-        {
+        let check_vcs_dir = self.0.opts.require_git
+            && (self.0.opts.git_ignore || self.0.opts.git_exclude);
+        let git_type = if check_vcs_dir {
             dir.join(".git").metadata().ok().map(|md| md.file_type())
         } else {
             None
         };
-        let has_git = git_type.map(|_| true).unwrap_or(false);
+        let has_git =
+            check_vcs_dir && (git_type.is_some() || dir.join(".jj").exists());
 
         let mut errs = PartialErrorBuilder::default();
         let custom_ig_matcher = if self.0.custom_ignore_filenames.is_empty() {
@@ -290,6 +303,7 @@ impl Ignore {
             errs.maybe_push(err);
             m
         };
+
         let gi_exclude_matcher = if !self.0.opts.git_exclude {
             Gitignore::empty()
         } else {
@@ -318,6 +332,10 @@ impl Ignore {
             parent: Some(self.clone()),
             is_absolute_parent: false,
             absolute_base: self.0.absolute_base.clone(),
+            global_gitignores_relative_to: self
+                .0
+                .global_gitignores_relative_to
+                .clone(),
             explicit_ignores: self.0.explicit_ignores.clone(),
             custom_ignore_filenames: self.0.custom_ignore_filenames.clone(),
             custom_ignore_matcher: custom_ig_matcher,
@@ -461,21 +479,27 @@ impl Ignore {
                 // off of `path`. Overall, this seems a little ham-fisted, but
                 // it does fix a nasty bug. It should do fine until we overhaul
                 // this crate.
-                let dirpath = self.0.dir.as_path();
-                let path_prefix = match strip_prefix("./", dirpath) {
-                    None => dirpath,
-                    Some(stripped_dot_slash) => stripped_dot_slash,
-                };
-                let path = match strip_prefix(path_prefix, path) {
-                    None => abs_parent_path.join(path),
-                    Some(p) => {
-                        let p = match strip_prefix("/", p) {
-                            None => p,
-                            Some(p) => p,
-                        };
-                        abs_parent_path.join(p)
-                    }
-                };
+                let path = abs_parent_path.join(
+                    self.parents()
+                        .take_while(|ig| !ig.0.is_absolute_parent)
+                        .last()
+                        .map_or(path, |ig| {
+                            // This is a weird special case when ripgrep users
+                            // search with just a `.`, as some tools do
+                            // automatically (like consult). In this case, if
+                            // we don't bail out now, the code below will strip
+                            // a leading `.` from `path`, which might mangle
+                            // a hidden file name!
+                            if ig.0.dir.as_path() == Path::new(".") {
+                                return path;
+                            }
+                            let without_dot_slash =
+                                strip_if_is_prefix("./", ig.0.dir.as_path());
+                            let relative_base =
+                                strip_if_is_prefix(without_dot_slash, path);
+                            strip_if_is_prefix("/", relative_base)
+                        }),
+                );
 
                 for ig in
                     self.parents().skip_while(|ig| !ig.0.is_absolute_parent)
@@ -575,6 +599,16 @@ pub(crate) struct IgnoreBuilder {
     explicit_ignores: Vec<Gitignore>,
     /// Ignore files in addition to .ignore.
     custom_ignore_filenames: Vec<OsString>,
+    /// The directory that gitignores should be interpreted relative to.
+    ///
+    /// Usually this is the directory containing the gitignore file. But in
+    /// some cases, like for global gitignores or for gitignores specified
+    /// explicitly, this should generally be set to the current working
+    /// directory. This is only used for global gitignores or "explicit"
+    /// gitignores.
+    ///
+    /// When `None`, global gitignores are ignored.
+    global_gitignores_relative_to: Option<PathBuf>,
     /// Ignore config.
     opts: IgnoreOptions,
 }
@@ -582,8 +616,9 @@ pub(crate) struct IgnoreBuilder {
 impl IgnoreBuilder {
     /// Create a new builder for an `Ignore` matcher.
     ///
-    /// All relative file paths are resolved with respect to the current
-    /// working directory.
+    /// It is likely a bug to use this without also calling `current_dir()`
+    /// outside of tests. This isn't made mandatory because this is an internal
+    /// abstraction and it's annoying to update tests.
     pub(crate) fn new() -> IgnoreBuilder {
         IgnoreBuilder {
             dir: Path::new("").to_path_buf(),
@@ -591,6 +626,7 @@ impl IgnoreBuilder {
             types: Arc::new(Types::empty()),
             explicit_ignores: vec![],
             custom_ignore_filenames: vec![],
+            global_gitignores_relative_to: None,
             opts: IgnoreOptions {
                 hidden: true,
                 ignore: true,
@@ -609,10 +645,20 @@ impl IgnoreBuilder {
     /// The matcher returned won't match anything until ignore rules from
     /// directories are added to it.
     pub(crate) fn build(&self) -> Ignore {
+        self.build_with_cwd(None)
+    }
+
+    /// Builds a new `Ignore` matcher using the given CWD directory.
+    ///
+    /// The matcher returned won't match anything until ignore rules from
+    /// directories are added to it.
+    pub(crate) fn build_with_cwd(&self, cwd: Option<PathBuf>) -> Ignore {
+        let global_gitignores_relative_to =
+            cwd.or_else(|| self.global_gitignores_relative_to.clone());
         let git_global_matcher = if !self.opts.git_global {
             Gitignore::empty()
-        } else {
-            let mut builder = GitignoreBuilder::new("");
+        } else if let Some(ref cwd) = global_gitignores_relative_to {
+            let mut builder = GitignoreBuilder::new(cwd);
             builder
                 .case_insensitive(self.opts.ignore_case_insensitive)
                 .unwrap();
@@ -621,6 +667,11 @@ impl IgnoreBuilder {
                 log::debug!("{}", err);
             }
             gi
+        } else {
+            log::debug!(
+                "ignoring global gitignore file because CWD is not known"
+            );
+            Gitignore::empty()
         };
 
         Ignore(Arc::new(IgnoreInner {
@@ -631,6 +682,7 @@ impl IgnoreBuilder {
             parent: None,
             is_absolute_parent: true,
             absolute_base: None,
+            global_gitignores_relative_to,
             explicit_ignores: Arc::new(self.explicit_ignores.clone()),
             custom_ignore_filenames: Arc::new(
                 self.custom_ignore_filenames.clone(),
@@ -643,6 +695,15 @@ impl IgnoreBuilder {
             has_git: false,
             opts: self.opts,
         }))
+    }
+
+    /// Set the current directory used for matching global gitignores.
+    pub(crate) fn current_dir(
+        &mut self,
+        cwd: impl Into<PathBuf>,
+    ) -> &mut IgnoreBuilder {
+        self.global_gitignores_relative_to = Some(cwd.into());
+        self
     }
 
     /// Add an override matcher.
@@ -874,12 +935,21 @@ fn resolve_git_commondir(
     Ok(commondir_abs)
 }
 
+/// Strips `prefix` from `path` if it's a prefix, otherwise returns `path`
+/// unchanged.
+fn strip_if_is_prefix<'a, P: AsRef<Path> + ?Sized>(
+    prefix: &'a P,
+    path: &'a Path,
+) -> &'a Path {
+    strip_prefix(prefix, path).map_or(path, |p| p)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{io::Write, path::Path};
 
     use crate::{
-        dir::IgnoreBuilder, gitignore::Gitignore, tests::TempDir, Error,
+        Error, dir::IgnoreBuilder, gitignore::Gitignore, tests::TempDir,
     };
 
     fn wfile<P: AsRef<Path>>(path: P, contents: &str) {
@@ -934,6 +1004,19 @@ mod tests {
     fn gitignore() {
         let td = tmpdir();
         mkdirp(td.path().join(".git"));
+        wfile(td.path().join(".gitignore"), "foo\n!bar");
+
+        let (ig, err) = IgnoreBuilder::new().build().add_child(td.path());
+        assert!(err.is_none());
+        assert!(ig.matched("foo", false).is_ignore());
+        assert!(ig.matched("bar", false).is_whitelist());
+        assert!(ig.matched("baz", false).is_none());
+    }
+
+    #[test]
+    fn gitignore_with_jj() {
+        let td = tmpdir();
+        mkdirp(td.path().join(".jj"));
         wfile(td.path().join(".gitignore"), "foo\n!bar");
 
         let (ig, err) = IgnoreBuilder::new().build().add_child(td.path());

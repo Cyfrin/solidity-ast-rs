@@ -1,33 +1,15 @@
 #![doc = include_str!("../README.md")]
 #![doc(issue_tracker_base_url = "https://github.com/recmo/uint/issues/")]
-#![warn(
-    clippy::all,
-    clippy::pedantic,
-    clippy::nursery,
-    clippy::missing_inline_in_public_items,
-    clippy::std_instead_of_alloc,
-    clippy::std_instead_of_core,
-    missing_docs,
-    unreachable_pub
-)]
-#![allow(
-    clippy::doc_markdown, // Unfortunately many false positives on Latex.
-    clippy::inline_always,
-    clippy::module_name_repetitions,
-    clippy::redundant_pub_crate,
-    clippy::unreadable_literal,
-    clippy::let_unit_value,
-    clippy::option_if_let_else,
-    clippy::cast_sign_loss,
-    clippy::cast_lossless,
-)]
 #![cfg_attr(test, allow(clippy::wildcard_imports, clippy::cognitive_complexity))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 // Unstable features
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![cfg_attr(feature = "nightly", feature(core_intrinsics))]
-#![cfg_attr(feature = "nightly", allow(internal_features))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(feature = "nightly", feature(core_intrinsics, bigint_helper_methods))]
+#![cfg_attr(
+    feature = "nightly",
+    allow(internal_features, clippy::incompatible_msrv)
+)]
 #![cfg_attr(
     feature = "generic_const_exprs",
     feature(generic_const_exprs),
@@ -113,13 +95,26 @@ pub mod nightly {
     pub type Bits<const BITS: usize> = crate::Bits<BITS, { crate::nlimbs(BITS) }>;
 }
 
-// FEATURE: (BLOCKED) Many functions could be made `const` if a number of
-// features land. This requires
-// #![feature(const_mut_refs)]
-// #![feature(const_float_classify)]
-// #![feature(const_fn_floating_point_arithmetic)]
-// #![feature(const_float_bits_conv)]
-// and more.
+/// Packed u128, for [`as_double_words`](Uint::as_double_words).
+#[derive(Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub(crate) struct pu128 {
+    inner: [u64; 2],
+}
+impl pu128 {
+    #[inline]
+    pub(crate) const fn get(self) -> u128 {
+        let arr = self.inner;
+        #[cfg(target_endian = "little")]
+        {
+            unsafe { core::mem::transmute(arr) }
+        }
+        #[cfg(target_endian = "big")]
+        {
+            arr[0] as u128 | (arr[1] as u128) << 64
+        }
+    }
+}
 
 /// The ring of numbers modulo $2^{\mathtt{BITS}}$.
 ///
@@ -167,6 +162,8 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     /// Bit mask for the last limb.
     pub const MASK: u64 = mask(BITS);
 
+    const SHOULD_MASK: bool = BITS > 0 && Self::MASK != u64::MAX;
+
     /// The size of this integer type in bits.
     pub const BITS: usize = BITS;
 
@@ -174,19 +171,18 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     /// types.
     pub const ZERO: Self = Self::from_limbs([0; LIMBS]);
 
+    /// The value one. This is useful to have as a constant for use in const fn.
+    ///
+    /// Zero if `BITS` is zero.
+    pub const ONE: Self = Self::const_from_u64(1);
+
     /// The smallest value that can be represented by this integer type.
     /// Synonym for [`Self::ZERO`].
     pub const MIN: Self = Self::ZERO;
 
     /// The largest value that can be represented by this integer type,
     /// $2^{\mathtt{BITS}} − 1$.
-    pub const MAX: Self = {
-        let mut limbs = [u64::MAX; LIMBS];
-        if BITS > 0 {
-            limbs[LIMBS - 1] &= Self::MASK;
-        }
-        Self::from_limbs(limbs)
-    };
+    pub const MAX: Self = Self::from_limbs_unmasked([u64::MAX; LIMBS]);
 
     /// View the array of limbs.
     #[inline(always)]
@@ -203,7 +199,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     /// size if the bit-size is not limb-aligned.
     #[inline(always)]
     #[must_use]
-    pub unsafe fn as_limbs_mut(&mut self) -> &mut [u64; LIMBS] {
+    pub const unsafe fn as_limbs_mut(&mut self) -> &mut [u64; LIMBS] {
         &mut self.limbs
     }
 
@@ -214,6 +210,13 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[must_use]
     pub const fn into_limbs(self) -> [u64; LIMBS] {
         self.limbs
+    }
+
+    #[inline]
+    pub(crate) const fn as_double_words(&self) -> &[pu128] {
+        assert!(LIMBS >= 2);
+        let (ptr, len) = (self.limbs.as_ptr(), self.limbs.len());
+        unsafe { core::slice::from_raw_parts(ptr.cast(), len / 2) }
     }
 
     /// Construct a new integer from little-endian a array of limbs.
@@ -227,14 +230,22 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[must_use]
     #[track_caller]
     pub const fn from_limbs(limbs: [u64; LIMBS]) -> Self {
-        if BITS > 0 && Self::MASK != u64::MAX {
+        if Self::SHOULD_MASK {
             // FEATURE: (BLOCKED) Add `<{BITS}>` to the type when Display works in const fn.
             assert!(
-                limbs[Self::LIMBS - 1] <= Self::MASK,
+                limbs[LIMBS - 1] <= Self::MASK,
                 "Value too large for this Uint"
             );
         }
+        let _ = Self::LIMBS; // Triggers the assertion.
         Self { limbs }
+    }
+
+    #[inline(always)]
+    #[must_use]
+    const fn from_limbs_unmasked(limbs: [u64; LIMBS]) -> Self {
+        let _ = Self::LIMBS; // Triggers the assertion.
+        Self { limbs }.masked()
     }
 
     /// Construct a new integer from little-endian a slice of limbs.
@@ -304,6 +315,19 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
             (_, true) => Self::MAX,
         }
     }
+
+    #[inline(always)]
+    const fn apply_mask(&mut self) {
+        if Self::SHOULD_MASK {
+            self.limbs[LIMBS - 1] &= Self::MASK;
+        }
+    }
+
+    #[inline(always)]
+    const fn masked(mut self) -> Self {
+        self.apply_mask();
+        self
+    }
 }
 
 impl<const BITS: usize, const LIMBS: usize> Default for Uint<BITS, LIMBS> {
@@ -318,7 +342,7 @@ impl<const BITS: usize, const LIMBS: usize> Default for Uint<BITS, LIMBS> {
 #[inline]
 #[must_use]
 pub const fn nlimbs(bits: usize) -> usize {
-    (bits + 63) / 64
+    bits.div_ceil(64)
 }
 
 /// Mask to apply to the highest limb to get the correct number of bits.
@@ -329,11 +353,7 @@ pub const fn mask(bits: usize) -> u64 {
         return 0;
     }
     let bits = bits % 64;
-    if bits == 0 {
-        u64::MAX
-    } else {
-        (1 << bits) - 1
-    }
+    if bits == 0 { u64::MAX } else { (1 << bits) - 1 }
 }
 
 // Not public API.

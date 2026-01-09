@@ -11,7 +11,7 @@ use std::{
     env, fmt, fs,
     path::{Path, PathBuf},
 };
-use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table};
+use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, value};
 
 pub type Result<T> = std::result::Result<T, ConfigError>;
 
@@ -100,8 +100,9 @@ impl Paths {
 
     /// Instantiate all the paths needed for Soldeer.
     ///
-    /// The root path defaults to the current directory but can be overridden with the
-    /// `SOLDEER_PROJECT_ROOT` environment variable.
+    /// The root path is automatically detected (by traversing the path) but can be overridden with
+    /// the `SOLDEER_PROJECT_ROOT` environment variable.
+    /// Alternatively, the [`Paths::with_root_and_config`] constructor can be used.
     ///
     /// If a config location is provided, it bypasses auto-detection and uses that. If `None`, then
     /// the location is auto-detected or if impossible, the `foundry.toml` file is used. If the
@@ -110,12 +111,27 @@ impl Paths {
     /// The paths are canonicalized.
     pub fn with_config(config_location: Option<ConfigLocation>) -> Result<Self> {
         let root = dunce::canonicalize(Self::get_root_path())?;
-        let config = Self::get_config_path(&root, config_location)?;
+        Self::with_root_and_config(root, config_location)
+    }
+
+    /// Instantiate all the paths needed for Soldeer.
+    ///
+    /// If a config location is provided, it bypasses auto-detection and uses that. If `None`, then
+    /// the location is auto-detected or if impossible, the `foundry.toml` file is used. If the
+    /// config file does not exist yet, it gets created with default content.
+    ///
+    /// The paths are canonicalized.
+    pub fn with_root_and_config(
+        root: impl AsRef<Path>,
+        config_location: Option<ConfigLocation>,
+    ) -> Result<Self> {
+        let root = root.as_ref();
+        let config = Self::get_config_path(root, config_location)?;
         let dependencies = root.join("dependencies");
         let lock = root.join("soldeer.lock");
         let remappings = root.join("remappings.txt");
 
-        Ok(Self { root, config, dependencies, lock, remappings })
+        Ok(Self { root: root.to_path_buf(), config, dependencies, lock, remappings })
     }
 
     /// Generate the paths object from a known root directory.
@@ -135,25 +151,26 @@ impl Paths {
 
     /// Get the root directory path.
     ///
-    /// At the moment, this is the current directory, unless overridden by the
-    /// `SOLDEER_PROJECT_ROOT` environment variable.
+    /// If `SOLDEER_PROJECT` root is present in the environment, this is the returned value. Else,
+    /// we search for the root of the project with `find_project_root`.
     pub fn get_root_path() -> PathBuf {
-        // TODO: find the project's root directory and use that as the root instead of the current
-        // dir
-        env::var("SOLDEER_PROJECT_ROOT")
-            .map(|p| {
+        let res = env::var("SOLDEER_PROJECT_ROOT").map_or_else(
+            |_| {
+                debug!("SOLDEER_PROJECT_ROOT not defined, searching for project root");
+                find_project_root(None::<PathBuf>).expect("could not find project root")
+            },
+            |p| {
                 if p.is_empty() {
-                    debug!("SOLDEER_PROJECT_ROOT exists but is empty, defaulting to current dir");
-                    env::current_dir().expect("could not get current dir")
+                    debug!("SOLDEER_PROJECT_ROOT exists but is empty, searching for project root");
+                    find_project_root(None::<PathBuf>).expect("could not find project root")
                 } else {
                     debug!(path = p; "root set by SOLDEER_PROJECT_ROOT");
                     PathBuf::from(p)
                 }
-            })
-            .unwrap_or_else(|_| {
-                debug!("SOLDEER_PROJECT_ROOT not defined, defaulting to current dir");
-                env::current_dir().expect("could not get current dir")
-            })
+            },
+        );
+        debug!(path:? = res; "found project root");
+        res
     }
 
     /// Get the path to the config file.
@@ -308,7 +325,8 @@ impl GitIdentifier {
 ///
 /// This struct is used to represent a git dependency from the config file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, bon::Builder)]
-#[builder(on(String, into))]
+#[allow(clippy::duplicated_attributes)]
+#[builder(on(String, into), on(PathBuf, into))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, Deserialize))]
 pub struct GitDependency {
     /// The name of the dependency (user-defined).
@@ -328,8 +346,14 @@ pub struct GitDependency {
 
     /// The git identifier (revision, branch or tag).
     ///
-    /// If omitted, the main branch is used.
+    /// If omitted, the default branch is used.
     pub identifier: Option<GitIdentifier>,
+
+    /// An optional relative path to the project's root within the repository.
+    ///
+    /// The project root is where the soldeer.toml or foundry.toml resides. If no path is provided,
+    /// then the repo's root must contain a Soldeer config.
+    pub project_root: Option<PathBuf>,
 }
 
 impl fmt::Display for GitDependency {
@@ -342,7 +366,8 @@ impl fmt::Display for GitDependency {
 ///
 /// This struct is used to represent an HTTP dependency from the config file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, bon::Builder)]
-#[builder(on(String, into))]
+#[allow(clippy::duplicated_attributes)]
+#[builder(on(String, into), on(PathBuf, into))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, Deserialize))]
 pub struct HttpDependency {
     /// The name of the dependency (user-defined).
@@ -362,6 +387,12 @@ pub struct HttpDependency {
     /// If omitted, the registry will be contacted to get the download URL for that dependency (by
     /// name).
     pub url: Option<String>,
+
+    /// An optional relative path to the project's root within the zip file.
+    ///
+    /// The project root is where the soldeer.toml or foundry.toml resides. If no path is provided,
+    /// then the zip's root must contain a Soldeer config.
+    pub project_root: Option<PathBuf>,
 }
 
 impl fmt::Display for HttpDependency {
@@ -465,12 +496,14 @@ impl Dependency {
                         version_req: dependency_version_req.to_string(),
                         git: url,
                         identifier,
+                        project_root: None,
                     }
                     .into(),
                     UrlType::Http(url) => HttpDependency {
                         name: dependency_name.to_string(),
                         version_req: dependency_version_req.to_string(),
                         url: Some(url),
+                        project_root: None,
                     }
                     .into(),
                 }
@@ -479,6 +512,7 @@ impl Dependency {
                 name: dependency_name.to_string(),
                 version_req: dependency_version_req.to_string(),
                 url: None,
+                project_root: None,
             }
             .into(),
         })
@@ -520,6 +554,14 @@ impl Dependency {
         find_install_path(self, deps).await
     }
 
+    /// Get the relative path to the project root (config file location).
+    pub fn project_root(&self) -> Option<PathBuf> {
+        match self {
+            Self::Http(dep) => dep.project_root.clone(),
+            Self::Git(dep) => dep.project_root.clone(),
+        }
+    }
+
     /// Convert the dependency to a TOML value for saving to the config file.
     pub fn to_toml_value(&self) -> (String, Item) {
         match self {
@@ -538,6 +580,14 @@ impl Dependency {
                             "url",
                             value(url).into_value().expect("url should be a valid toml value"),
                         );
+                        if let Some(path) = dep.project_root.as_ref() {
+                            table.insert(
+                                "project_root",
+                                value(path.to_string_lossy().into_owned())
+                                    .into_value()
+                                    .expect("project_root should be a valid toml value"),
+                            );
+                        }
                         value(table)
                     }
                     None => value(&dep.version_req),
@@ -578,6 +628,14 @@ impl Dependency {
                     }
                     None => {}
                 }
+                if let Some(path) = dep.project_root.as_ref() {
+                    table.insert(
+                        "project_root",
+                        value(path.to_string_lossy().into_owned())
+                            .into_value()
+                            .expect("project_root should be a valid toml value"),
+                    );
+                }
                 (dep.name.clone(), value(table))
             }
         }
@@ -590,20 +648,12 @@ impl Dependency {
 
     /// Cast to a HTTP dependency if it is one.
     pub fn as_http(&self) -> Option<&HttpDependency> {
-        if let Self::Http(v) = self {
-            Some(v)
-        } else {
-            None
-        }
+        if let Self::Http(v) = self { Some(v) } else { None }
     }
 
     /// Cast to a mutable HTTP dependency if it is one.
     pub fn as_http_mut(&mut self) -> Option<&mut HttpDependency> {
-        if let Self::Http(v) = self {
-            Some(v)
-        } else {
-            None
-        }
+        if let Self::Http(v) = self { Some(v) } else { None }
     }
 
     /// Check if the dependency is a git dependency.
@@ -613,20 +663,12 @@ impl Dependency {
 
     /// Cast to a git dependency if it is one.
     pub fn as_git(&self) -> Option<&GitDependency> {
-        if let Self::Git(v) = self {
-            Some(v)
-        } else {
-            None
-        }
+        if let Self::Git(v) = self { Some(v) } else { None }
     }
 
     /// Cast to a mutable git dependency if it is one.
     pub fn as_git_mut(&mut self) -> Option<&mut GitDependency> {
-        if let Self::Git(v) = self {
-            Some(v)
-        } else {
-            None
-        }
+        if let Self::Git(v) = self { Some(v) } else { None }
     }
 }
 
@@ -749,6 +791,7 @@ pub fn detect_config_location(root: impl AsRef<Path>) -> Option<ConfigLocation> 
 ///   - `rev` (optional): the revision hash for git dependencies
 ///   - `branch` (optional): the branch name for git dependencies
 ///   - `tag` (optional): the tag name for git dependencies
+///   - `project_root` (optional): relative path to the folder containing the config file
 pub fn read_config_deps(path: impl AsRef<Path>) -> Result<(Vec<Dependency>, Vec<ParsingWarning>)> {
     let contents = fs::read_to_string(&path)?;
     let doc: DocumentMut = contents.parse::<DocumentMut>()?;
@@ -871,6 +914,41 @@ pub fn update_config_libs(foundry_config: impl AsRef<Path>) -> Result<()> {
     Ok(())
 }
 
+/// Find the top-level directory of the working git tree.
+///
+/// If no `.git` folder is found in the ancestors, `None` is returned.
+fn find_git_root(relative_to: impl AsRef<Path>) -> Result<Option<PathBuf>> {
+    let root = dunce::canonicalize(relative_to)?;
+    Ok(root.ancestors().find(|p| p.join(".git").is_dir()).map(Path::to_path_buf))
+}
+
+/// Find the root of the project at the current directory or path specified by `cwd`.
+///
+/// Looks for a file named `foundry.toml` or `soldeer.toml` in the ancestors of the optional path
+/// passed as argument. If `None` is given, then the current directory is retrieved from the
+/// environment and used as the start point for the search.
+///
+/// The search is bounded by the root of the working git tree, so as to avoid false positives for
+/// nested dependencies. If no config file is found, but a `.git` folder is found, then the
+/// top-level directory of the working git tree will be returned. If the git root cannot be found,
+/// then the start point of the search is returned (current dir or given path).
+///
+/// This function is not meant to be used directly, instead use [`Paths::get_root_path`] which
+/// honors environment variables.
+fn find_project_root(cwd: Option<impl AsRef<Path>>) -> Result<PathBuf> {
+    let cwd = match cwd {
+        Some(path) => dunce::canonicalize(path)?,
+        None => env::current_dir()?,
+    };
+    let boundary = find_git_root(&cwd)?;
+    let found = cwd
+        .ancestors()
+        .take_while(|p| boundary.as_ref().map(|b| p.starts_with(b)).unwrap_or(true))
+        .find(|p| p.join("foundry.toml").is_file() || p.join("soldeer.toml").is_file())
+        .map(Path::to_path_buf);
+    Ok(found.or(boundary).unwrap_or_else(|| cwd.to_path_buf()))
+}
+
 /// Parse a dependency from a TOML value.
 ///
 /// The value can be a string (version requirement) or a table.
@@ -881,6 +959,7 @@ pub fn update_config_libs(foundry_config: impl AsRef<Path>) -> Result<()> {
 /// - `rev` (optional): the revision hash for git dependencies
 /// - `branch` (optional): the branch name for git dependencies
 /// - `tag` (optional): the tag name for git dependencies
+/// - `project_root` (optional): relative path to the folder containing the config file
 ///
 /// Note that the version requirement string cannot contain the `=` symbol for git dependencies
 /// and HTTP dependencies with a custom URL.
@@ -891,7 +970,13 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<ParsingResu
             return Err(ConfigError::EmptyVersion(name));
         }
         // this function does not retrieve the url
-        return Ok(HttpDependency { name, version_req: version_req.to_string(), url: None }.into());
+        return Ok(HttpDependency {
+            name,
+            version_req: version_req.to_string(),
+            url: None,
+            project_root: None,
+        }
+        .into());
     }
 
     // we should have a table or inline table
@@ -913,7 +998,7 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<ParsingResu
 
     // check for unsupported fields
     warnings.extend(table.iter().filter_map(|(k, _)| {
-        if !["version", "url", "git", "rev", "branch", "tag"].contains(&k) {
+        if !["version", "url", "git", "rev", "branch", "tag", "project_root"].contains(&k) {
             warn!(dependency = name; "toml parsing: `{k}` is not a valid dependency option");
             Some(ParsingWarning {
                 dependency_name: name.clone(),
@@ -939,6 +1024,16 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<ParsingResu
         return Err(ConfigError::EmptyVersion(name));
     }
 
+    // both types of dependency definition can have the `project_root` field.
+    let project_root = match table.get("project_root").map(|v| v.as_str()) {
+        Some(Some(path)) => Some(path.into()),
+        Some(None) => {
+            debug!(dep = name; "dependency's `project_root` field is not a string");
+            return Err(ConfigError::InvalidField { field: "project_root".to_string(), dep: name });
+        }
+        None => None,
+    };
+
     // check if it's a git dependency
     match table.get("git").map(|v| v.as_str()) {
         Some(None) => {
@@ -952,7 +1047,7 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<ParsingResu
                     field: "url".to_string(),
                     conflicts_with: "git".to_string(),
                     dep: name,
-                })
+                });
             }
 
             // for git dependencies, the version requirement string is going to be used as part of
@@ -999,8 +1094,14 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<ParsingResu
                 }
             };
             return Ok(ParsingResult {
-                dependency: GitDependency { name, git: git.to_string(), version_req, identifier }
-                    .into(),
+                dependency: GitDependency {
+                    name,
+                    git: git.to_string(),
+                    version_req,
+                    identifier,
+                    project_root,
+                }
+                .into(),
                 warnings,
             });
         }
@@ -1028,7 +1129,7 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<ParsingResu
             Err(ConfigError::InvalidField { field: "url".to_string(), dep: name })
         }
         None => Ok(ParsingResult {
-            dependency: HttpDependency { name, version_req, url: None }.into(),
+            dependency: HttpDependency { name, version_req, url: None, project_root }.into(),
             warnings,
         }),
         Some(Some(url)) => {
@@ -1040,7 +1141,13 @@ fn parse_dependency(name: impl Into<String>, value: &Item) -> Result<ParsingResu
                 return Err(ConfigError::InvalidVersionReq(name));
             }
             Ok(ParsingResult {
-                dependency: HttpDependency { name, version_req, url: Some(url.to_string()) }.into(),
+                dependency: HttpDependency {
+                    name,
+                    version_req,
+                    url: Some(url.to_string()),
+                    project_root,
+                }
+                .into(),
                 warnings,
             })
         }
@@ -1388,6 +1495,8 @@ libs = ["dependencies"]
 "lib5" = { version = "5.0.0", git = "https://example.com/repo.git", rev = "123456" }
 "lib6" = { version = "6.0.0", git = "https://example.com/repo.git", branch = "dev" }
 "lib7" = { version = "7.0.0", git = "https://example.com/repo.git", tag = "v7.0.0" }
+"lib8" = { version = "8.0.0", url = "https://example.com", project_root = "foo/bar" }
+"lib9" = { version = "9.0.0", git = "https://example.com/repo.git", project_root = "test/test2" }
 "#;
         let config_path = write_to_config(config_contents, "foundry.toml");
         let res = read_config_deps(config_path);
@@ -1450,6 +1559,26 @@ libs = ["dependencies"]
                 .build()
                 .into()
         );
+        assert_eq!(
+            result[7],
+            HttpDependency::builder()
+                .name("lib8")
+                .version_req("8.0.0")
+                .url("https://example.com")
+                .project_root("foo/bar")
+                .build()
+                .into()
+        );
+        assert_eq!(
+            result[8],
+            GitDependency::builder()
+                .name("lib9")
+                .version_req("9.0.0")
+                .git("https://example.com/repo.git")
+                .project_root("test/test2")
+                .build()
+                .into()
+        );
     }
 
     #[test]
@@ -1462,6 +1591,8 @@ libs = ["dependencies"]
 "lib5" = { version = "5.0.0", git = "https://example.com/repo.git", rev = "123456" }
 "lib6" = { version = "6.0.0", git = "https://example.com/repo.git", branch = "dev" }
 "lib7" = { version = "7.0.0", git = "https://example.com/repo.git", tag = "v7.0.0" }
+"lib8" = { version = "8.0.0", url = "https://example.com", project_root = "foo/bar" }
+"lib9" = { version = "9.0.0", git = "https://example.com/repo.git", project_root = "test/test2" }
 "#;
         let config_path = write_to_config(config_contents, "soldeer.toml");
         let res = read_config_deps(config_path);
@@ -1521,6 +1652,26 @@ libs = ["dependencies"]
                 .version_req("7.0.0")
                 .git("https://example.com/repo.git")
                 .identifier(GitIdentifier::from_tag("v7.0.0"))
+                .build()
+                .into()
+        );
+        assert_eq!(
+            result[7],
+            HttpDependency::builder()
+                .name("lib8")
+                .version_req("8.0.0")
+                .url("https://example.com")
+                .project_root("foo/bar")
+                .build()
+                .into()
+        );
+        assert_eq!(
+            result[8],
+            GitDependency::builder()
+                .name("lib9")
+                .version_req("9.0.0")
+                .git("https://example.com/repo.git")
+                .project_root("test/test2")
                 .build()
                 .into()
         );
@@ -1590,6 +1741,13 @@ libs = ["dependencies"]
                 .url("https://test.com/test.zip")
                 .build()
                 .into(),
+            HttpDependency::builder()
+                .name("lib21")
+                .version_req("1.0.0")
+                .url("https://test.com/test.zip")
+                .project_root("foo/bar")
+                .build()
+                .into(),
             GitDependency::builder()
                 .name("lib3")
                 .version_req("1.0.0")
@@ -1615,6 +1773,13 @@ libs = ["dependencies"]
                 .version_req("1.0.0")
                 .git("https://example.com/repo.git")
                 .identifier(GitIdentifier::from_tag("v1.0.0"))
+                .build()
+                .into(),
+            GitDependency::builder()
+                .name("lib7")
+                .version_req("1.0.0")
+                .git("https://example.com/repo.git")
+                .project_root("foo/bar")
                 .build()
                 .into(),
         ];
@@ -1649,41 +1814,53 @@ libs = ["dependencies"]
 "lib5" = { version = "5.0.0", git = "https://example.com/repo.git", rev = "123456" }
 "lib6" = { version = "6.0.0", git = "https://example.com/repo.git", branch = "dev" }
 "lib7" = { version = "7.0.0", git = "https://example.com/repo.git", tag = "v7.0.0" }
+"lib8" = { version = "8.0.0", url = "https://example.com", project_root = "foo/bar" }
+"lib9" = { version = "9.0.0", git = "https://example.com/repo.git", project_root = "foo/bar" }
         "#;
         let config_path = write_to_config(config_contents, "soldeer.toml");
         let res = delete_from_config("lib1", &config_path);
         assert!(res.is_ok(), "{res:?}");
         assert_eq!(res.unwrap().name(), "lib1");
-        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 6);
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 8);
 
         let res = delete_from_config("lib2", &config_path);
         assert!(res.is_ok(), "{res:?}");
         assert_eq!(res.unwrap().name(), "lib2");
-        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 5);
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 7);
 
         let res = delete_from_config("lib3", &config_path);
         assert!(res.is_ok(), "{res:?}");
         assert_eq!(res.unwrap().name(), "lib3");
-        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 4);
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 6);
 
         let res = delete_from_config("lib4", &config_path);
         assert!(res.is_ok(), "{res:?}");
         assert_eq!(res.unwrap().name(), "lib4");
-        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 3);
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 5);
 
         let res = delete_from_config("lib5", &config_path);
         assert!(res.is_ok(), "{res:?}");
         assert_eq!(res.unwrap().name(), "lib5");
-        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 2);
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 4);
 
         let res = delete_from_config("lib6", &config_path);
         assert!(res.is_ok(), "{res:?}");
         assert_eq!(res.unwrap().name(), "lib6");
-        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 1);
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 3);
 
         let res = delete_from_config("lib7", &config_path);
         assert!(res.is_ok(), "{res:?}");
         assert_eq!(res.unwrap().name(), "lib7");
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 2);
+
+        let res = delete_from_config("lib8", &config_path);
+        assert!(res.is_ok(), "{res:?}");
+        assert_eq!(res.unwrap().name(), "lib8");
+        assert_eq!(read_config_deps(&config_path).unwrap().0.len(), 1);
+
+        let res = delete_from_config("lib9", &config_path);
+        assert!(res.is_ok(), "{res:?}");
+        assert_eq!(res.unwrap().name(), "lib9");
         assert!(read_config_deps(&config_path).unwrap().0.is_empty());
     }
 
@@ -1768,6 +1945,8 @@ libs = ["dependencies"]
 "lib5" = { version = "5.0.0", git = "https://example.com/repo.git", rev = "123456" }
 "lib6" = { version = "6.0.0", git = "https://example.com/repo.git", branch = "dev" }
 "lib7" = { version = "7.0.0", git = "https://example.com/repo.git", tag = "v7.0.0" }
+"lib8" = { version = "8.0.0", url = "https://example.com", project_root = "foo/bar" }
+"lib9" = { version = "9.0.0", git = "https://example.com/repo.git", project_root = "foo/bar" }
 "#;
         let doc: DocumentMut = config_contents.parse::<DocumentMut>().unwrap();
         let data = doc.get("dependencies").map(|v| v.as_table()).unwrap().unwrap();
@@ -1837,5 +2016,107 @@ libs = ["dependencies"]
             let res = parse_dependency(name, v).unwrap();
             assert!(res.warnings[0].message.ends_with("is ignored if no `git` URL is provided"));
         }
+    }
+
+    #[test]
+    fn test_find_git_root() {
+        let test_dir = testdir!();
+        let git_dir = test_dir.join(".git");
+        fs::create_dir(&git_dir).unwrap();
+
+        let result = find_git_root(&test_dir);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), Some(test_dir.clone()));
+
+        // test with a subdirectory
+        let sub_dir = test_dir.join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+
+        let result = find_git_root(&sub_dir);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), Some(test_dir));
+
+        // test outside of a git folder
+        let temp_dir = std::env::temp_dir().join("soldeer_test_no_git");
+        if !temp_dir.exists() {
+            fs::create_dir(&temp_dir).unwrap();
+        }
+
+        let result = find_git_root(&temp_dir);
+        assert_eq!(result.unwrap(), None);
+
+        // clean up
+        fs::remove_dir(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_find_git_root_nested() {
+        // test nested git repositories
+        let outer_dir = testdir!();
+        fs::create_dir(outer_dir.join(".git")).unwrap();
+
+        let inner_dir = outer_dir.join("inner");
+        fs::create_dir(&inner_dir).unwrap();
+        fs::create_dir(inner_dir.join(".git")).unwrap();
+
+        // should find the inner git root when starting from inner directory
+        let result = find_git_root(&inner_dir);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), Some(inner_dir));
+
+        // should find the outer git root when starting from outer directory
+        let result = find_git_root(&outer_dir);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), Some(outer_dir));
+    }
+
+    #[test]
+    fn test_find_project_root_with_foundry_toml() {
+        let test_dir = testdir!();
+        let foundry_toml = test_dir.join("foundry.toml");
+        fs::write(&foundry_toml, "[dependencies]\n").unwrap();
+
+        let result = find_project_root(Some(&test_dir));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), test_dir);
+    }
+
+    #[test]
+    fn test_find_project_root_with_soldeer_toml() {
+        let test_dir = testdir!();
+        let soldeer_toml = test_dir.join("soldeer.toml");
+        fs::write(&soldeer_toml, "[dependencies]\n").unwrap();
+
+        let result = find_project_root(Some(&test_dir));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), test_dir);
+    }
+
+    #[test]
+    fn test_find_project_root_in_subdirectory() {
+        let test_dir = testdir!();
+        let foundry_toml = test_dir.join("foundry.toml");
+        fs::write(&foundry_toml, "[dependencies]\n").unwrap();
+
+        let sub_dir = test_dir.join("src");
+        fs::create_dir(&sub_dir).unwrap();
+
+        let result = find_project_root(Some(&sub_dir));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), test_dir);
+    }
+
+    #[test]
+    fn test_find_project_root_git_boundary() {
+        let test_dir = testdir!();
+        let git_folder = test_dir.join(".git");
+        fs::create_dir(&git_folder).unwrap();
+
+        let sub_dir = test_dir.join("src");
+        fs::create_dir(&sub_dir).unwrap();
+
+        let result = find_project_root(Some(&sub_dir));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(result.unwrap(), test_dir);
     }
 }

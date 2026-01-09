@@ -4,6 +4,11 @@
 /// This functionally creates a new named `FixedBytes` that cannot be
 /// type-confused for another named `FixedBytes`.
 ///
+/// **NOTE:** This macro currently requires:
+/// - `#![cfg_attr(docsrs, feature(doc_cfg), allow(unexpected_cfgs))]` at the top level of the
+///   crate. The `allow` is optional, but it's probably required if `cfg(docsrs)` is ran in CI.
+/// - The `derive_more` crate in scope.
+///
 /// # Examples
 ///
 /// ```
@@ -174,12 +179,63 @@ macro_rules! wrap_fixed_bytes {
             }
         }
 
+        impl $crate::private::core::ops::BitAnd<&Self> for $name {
+            type Output = Self;
+
+            #[inline]
+            fn bitand(self, rhs: &Self) -> Self {
+                Self(self.0.bitand(&rhs.0))
+            }
+        }
+
+        impl $crate::private::core::ops::BitAndAssign<&Self> for $name {
+            #[inline]
+            fn bitand_assign(&mut self, rhs: &Self) {
+                self.0.bitand_assign(&rhs.0)
+            }
+        }
+
+        impl $crate::private::core::ops::BitOr<&Self> for $name {
+            type Output = Self;
+
+            #[inline]
+            fn bitor(self, rhs: &Self) -> Self {
+                Self(self.0.bitor(&rhs.0))
+            }
+        }
+
+        impl $crate::private::core::ops::BitOrAssign<&Self> for $name {
+            #[inline]
+            fn bitor_assign(&mut self, rhs: &Self) {
+                self.0.bitor_assign(&rhs.0)
+            }
+        }
+
+        impl $crate::private::core::ops::BitXor<&Self> for $name {
+            type Output = Self;
+
+            #[inline]
+            fn bitxor(self, rhs: &Self) -> Self {
+                Self(self.0.bitxor(&rhs.0))
+            }
+        }
+
+        impl $crate::private::core::ops::BitXorAssign<&Self> for $name {
+            #[inline]
+            fn bitxor_assign(&mut self, rhs: &Self) {
+                self.0.bitxor_assign(&rhs.0)
+            }
+        }
+
         $crate::impl_fb_traits!($name, $n);
+        $crate::impl_borsh!($name, $n);
         $crate::impl_rlp!($name, $n);
         $crate::impl_serde!($name);
         $crate::impl_allocative!($name);
         $crate::impl_arbitrary!($name, $n);
         $crate::impl_rand!($name);
+        $crate::impl_diesel!($name, $n);
+        $crate::impl_sqlx!($name, $n);
 
         impl $name {
             /// Array of Zero bytes.
@@ -492,6 +548,15 @@ macro_rules! impl_rand {
             Self($crate::FixedBytes::random_with(rng))
         }
 
+        /// Tries to create a new fixed byte array with the given random number generator.
+        #[inline]
+        #[cfg_attr(docsrs, doc(cfg(feature = "rand")))]
+        pub fn try_random_with<R: $crate::private::rand::TryRngCore + ?Sized>(
+            rng: &mut R,
+        ) -> $crate::private::Result<Self, R::Error> {
+            $crate::FixedBytes::try_random_with(rng).map(Self)
+        }
+
         /// Fills this fixed byte array with the given random number generator.
         #[inline]
         #[doc(alias = "randomize_using")]
@@ -499,12 +564,22 @@ macro_rules! impl_rand {
         pub fn randomize_with<R: $crate::private::rand::RngCore + ?Sized>(&mut self, rng: &mut R) {
             self.0.randomize_with(rng);
         }
+
+        /// Tries to fill this fixed byte array with the given random number generator.
+        #[inline]
+        #[cfg_attr(docsrs, doc(cfg(feature = "rand")))]
+        pub fn try_randomize_with<R: $crate::private::rand::TryRngCore + ?Sized>(
+            &mut self,
+            rng: &mut R,
+        ) -> $crate::private::Result<(), R::Error> {
+            self.0.try_randomize_with(rng)
+        }
     };
 
     ($t:ty) => {
         #[cfg_attr(docsrs, doc(cfg(feature = "rand")))]
-        impl $crate::private::rand::distributions::Distribution<$t>
-            for $crate::private::rand::distributions::Standard
+        impl $crate::private::rand::distr::Distribution<$t>
+            for $crate::private::rand::distr::StandardUniform
         {
             #[inline]
             fn sample<R: $crate::private::rand::Rng + ?Sized>(&self, rng: &mut R) -> $t {
@@ -542,7 +617,7 @@ macro_rules! impl_rlp {
             }
 
             #[inline]
-            fn encode(&self, out: &mut dyn bytes::BufMut) {
+            fn encode(&self, out: &mut dyn $crate::private::alloy_rlp::BufMut) {
                 $crate::private::alloy_rlp::Encodable::encode(&self.0, out)
             }
         }
@@ -558,6 +633,41 @@ macro_rules! impl_rlp {
 #[cfg(not(feature = "rlp"))]
 macro_rules! impl_rlp {
     ($t:ty, $n:literal) => {};
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "borsh")]
+macro_rules! impl_borsh {
+    ($t:ty, $n:literal) => {
+        #[cfg_attr(docsrs, doc(cfg(feature = "borsh")))]
+        impl $crate::private::borsh::BorshSerialize for $t {
+            #[inline]
+            fn serialize<W: $crate::private::borsh::io::Write>(
+                &self,
+                writer: &mut W,
+            ) -> Result<(), $crate::private::borsh::io::Error> {
+                <$crate::FixedBytes<$n> as $crate::private::borsh::BorshSerialize>::serialize(&self.0, writer)
+            }
+        }
+
+        #[cfg_attr(docsrs, doc(cfg(feature = "borsh")))]
+        impl $crate::private::borsh::BorshDeserialize for $t {
+            #[inline]
+            fn deserialize_reader<R: $crate::private::borsh::io::Read>(
+                reader: &mut R,
+            ) -> Result<Self, $crate::private::borsh::io::Error> {
+                <$crate::FixedBytes<$n> as $crate::private::borsh::BorshDeserialize>::deserialize_reader(reader).map(Self)
+            }
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(not(feature = "borsh"))]
+macro_rules! impl_borsh {
+    ($($t:tt)*) => {};
 }
 
 #[doc(hidden)]
@@ -590,7 +700,10 @@ macro_rules! impl_serde {
         #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
         impl $crate::private::serde::Serialize for $t {
             #[inline]
-            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            fn serialize<S: $crate::private::serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error> {
                 $crate::private::serde::Serialize::serialize(&self.0, serializer)
             }
         }
@@ -669,6 +782,184 @@ macro_rules! impl_arbitrary {
     ($t:ty, $n:literal) => {};
 }
 
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "diesel")]
+macro_rules! impl_diesel {
+    ($t:ty, $n:literal) => {
+        const _: () = {
+            use $crate::private::diesel::{
+                Queryable,
+                backend::Backend,
+                deserialize::{FromSql, Result as DeserResult},
+                expression::AsExpression,
+                internal::derives::as_expression::Bound,
+                serialize::{Output, Result as SerResult, ToSql},
+                sql_types::{Binary, Nullable, SingleValue},
+            };
+
+            impl<Db> ToSql<Binary, Db> for $t
+            where
+                Db: Backend,
+                [u8]: ToSql<Binary, Db>,
+            {
+                fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Db>) -> SerResult {
+                    <$crate::FixedBytes<$n> as ToSql<Binary, Db>>::to_sql(&self.0, out)
+                }
+            }
+
+            impl<Db> FromSql<Binary, Db> for $t
+            where
+                Db: Backend,
+                *const [u8]: FromSql<Binary, Db>,
+            {
+                fn from_sql(bytes: Db::RawValue<'_>) -> DeserResult<Self> {
+                    <$crate::FixedBytes<$n> as FromSql<Binary, Db>>::from_sql(bytes).map(Self)
+                }
+            }
+
+            // Note: the following impls are equivalent to the expanded derive macro produced by
+            // #[derive(diesel::AsExpression)]
+            impl<Db> ToSql<Nullable<Binary>, Db> for $t
+            where
+                Db: Backend,
+                Self: ToSql<Binary, Db>,
+            {
+                fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Db>) -> SerResult {
+                    ToSql::<Binary, Db>::to_sql(self, out)
+                }
+            }
+
+            impl AsExpression<Binary> for $t {
+                type Expression = Bound<Binary, Self>;
+                fn as_expression(self) -> Self::Expression {
+                    Bound::new(self)
+                }
+            }
+
+            impl AsExpression<Nullable<Binary>> for $t {
+                type Expression = Bound<Nullable<Binary>, Self>;
+                fn as_expression(self) -> Self::Expression {
+                    Bound::new(self)
+                }
+            }
+
+            impl AsExpression<Binary> for &$t {
+                type Expression = Bound<Binary, Self>;
+                fn as_expression(self) -> Self::Expression {
+                    Bound::new(self)
+                }
+            }
+
+            impl AsExpression<Nullable<Binary>> for &$t {
+                type Expression = Bound<Nullable<Binary>, Self>;
+                fn as_expression(self) -> Self::Expression {
+                    Bound::new(self)
+                }
+            }
+
+            impl AsExpression<Binary> for &&$t {
+                type Expression = Bound<Binary, Self>;
+                fn as_expression(self) -> Self::Expression {
+                    Bound::new(self)
+                }
+            }
+
+            impl AsExpression<Nullable<Binary>> for &&$t {
+                type Expression = Bound<Nullable<Binary>, Self>;
+                fn as_expression(self) -> Self::Expression {
+                    Bound::new(self)
+                }
+            }
+
+            // Note: the following impl is equivalent to the expanded derive macro produced by
+            // #[derive(diesel::Queryable)]
+            impl<Db, St> Queryable<St, Db> for $t
+            where
+                Db: Backend,
+                St: SingleValue,
+                Self: FromSql<St, Db>,
+            {
+                type Row = Self;
+                fn build(row: Self::Row) -> DeserResult<Self> {
+                    Ok(row)
+                }
+            }
+        };
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(not(feature = "diesel"))]
+macro_rules! impl_diesel {
+    ($t:ty, $n:literal) => {};
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(feature = "sqlx")]
+macro_rules! impl_sqlx {
+    ($t:ty, $n:literal) => {
+        const _: () = {
+            use $crate::private::{
+                Vec,
+                sqlx_core::{
+                    database::Database,
+                    decode::Decode,
+                    encode::{Encode, IsNull},
+                    error::BoxDynError,
+                    types::Type,
+                },
+            };
+
+            impl<DB> Type<DB> for $t
+            where
+                DB: Database,
+                Vec<u8>: Type<DB>,
+            {
+                fn type_info() -> <DB as Database>::TypeInfo {
+                    <$crate::FixedBytes<$n> as Type<DB>>::type_info()
+                }
+
+                fn compatible(ty: &<DB as Database>::TypeInfo) -> bool {
+                    <$crate::FixedBytes<$n> as Type<DB>>::compatible(ty)
+                }
+            }
+
+            impl<'a, DB> Encode<'a, DB> for $t
+            where
+                DB: Database,
+                Vec<u8>: Encode<'a, DB>,
+            {
+                fn encode_by_ref(
+                    &self,
+                    buf: &mut <DB as Database>::ArgumentBuffer<'a>,
+                ) -> Result<IsNull, BoxDynError> {
+                    <$crate::FixedBytes<$n> as Encode<DB>>::encode_by_ref(&self.0, buf)
+                }
+            }
+
+            impl<'a, DB> Decode<'a, DB> for $t
+            where
+                DB: Database,
+                Vec<u8>: Decode<'a, DB>,
+            {
+                fn decode(value: <DB as Database>::ValueRef<'a>) -> Result<Self, BoxDynError> {
+                    <$crate::FixedBytes<$n> as Decode<DB>>::decode(value).map(Self)
+                }
+            }
+        };
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(not(feature = "sqlx"))]
+macro_rules! impl_sqlx {
+    ($t:ty, $n:literal) => {};
+}
+
 macro_rules! fixed_bytes_macros {
     ($d:tt $($(#[$attr:meta])* macro $name:ident($ty:ident $($rest:tt)*);)*) => {$(
         /// Converts a sequence of string literals containing hex-encoded data
@@ -732,7 +1023,7 @@ fixed_bytes_macros! { $
 /// # Examples
 ///
 /// ```
-/// use alloy_primitives::{bytes, Bytes};
+/// use alloy_primitives::{Bytes, bytes};
 ///
 /// static MY_BYTES: Bytes = bytes!("0x0123" "0xabcd");
 /// assert_eq!(MY_BYTES, Bytes::from(&[0x01, 0x23, 0xab, 0xcd]));
@@ -758,7 +1049,7 @@ macro_rules! bytes {
 
 #[cfg(test)]
 mod tests {
-    use crate::{hex, Address, Bytes, FixedBytes};
+    use crate::{Address, Bytes, FixedBytes, hex};
 
     #[test]
     fn bytes_macros() {

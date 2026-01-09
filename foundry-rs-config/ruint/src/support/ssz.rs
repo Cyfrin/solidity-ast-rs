@@ -2,7 +2,7 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "ssz")))]
 use ssz::{Decode, DecodeError, Encode};
 
-use crate::{nbytes, Uint};
+use crate::{Uint, nbytes};
 
 impl<const BITS: usize, const LIMBS: usize> Encode for Uint<BITS, LIMBS> {
     fn is_ssz_fixed_len() -> bool {
@@ -45,7 +45,7 @@ impl<const BITS: usize, const LIMBS: usize> Decode for Uint<BITS, LIMBS> {
 #[cfg(test)]
 mod tests {
     use proptest::proptest;
-    use ruint::{const_for, nlimbs, Uint};
+    use ruint::{Uint, const_for, nlimbs};
     use ssz::DecodeError;
 
     #[test]
@@ -55,7 +55,7 @@ mod tests {
             proptest!(|(value: Uint<BITS, LIMBS>)| {
                 let expected = value;
                 let encoded = ssz::Encode::as_ssz_bytes(&expected);
-                let actual = ssz::Decode::from_ssz_bytes(&encoded).unwrap();
+                let actual: Uint<BITS, LIMBS> = ssz::Decode::from_ssz_bytes(&encoded).unwrap();
                 assert_eq!(expected, actual, "Failed for value: {value:?}" );
             });
 

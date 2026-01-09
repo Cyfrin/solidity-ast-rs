@@ -1,13 +1,19 @@
 use crate::FixedBytes;
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     borrow::Borrow,
     fmt,
     ops::{Deref, DerefMut, RangeBounds},
 };
 
+#[cfg(feature = "borsh")]
+mod borsh;
+
 #[cfg(feature = "rlp")]
 mod rlp;
+
+#[cfg(feature = "rkyv")]
+mod rkyv;
 
 #[cfg(feature = "serde")]
 mod serde;
@@ -179,13 +185,6 @@ impl From<&'static str> for Bytes {
 impl From<Box<[u8]>> for Bytes {
     #[inline]
     fn from(value: Box<[u8]>) -> Self {
-        Self(value.into())
-    }
-}
-
-impl From<String> for Bytes {
-    #[inline]
-    fn from(value: String) -> Self {
         Self(value.into())
     }
 }

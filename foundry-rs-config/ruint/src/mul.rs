@@ -1,4 +1,4 @@
-use crate::{algorithms, nlimbs, Uint};
+use crate::{Uint, algorithms, nlimbs};
 use core::{
     iter::Product,
     num::Wrapping,
@@ -39,9 +39,9 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
         let mut result = Self::ZERO;
         let mut overflow = algorithms::addmul(&mut result.limbs, self.as_limbs(), rhs.as_limbs());
-        if BITS > 0 {
+        if Self::SHOULD_MASK {
             overflow |= result.limbs[LIMBS - 1] > Self::MASK;
-            result.limbs[LIMBS - 1] &= Self::MASK;
+            result.apply_mask();
         }
         (result, overflow)
     }
@@ -63,9 +63,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     pub fn wrapping_mul(self, rhs: Self) -> Self {
         let mut result = Self::ZERO;
         algorithms::addmul_n(&mut result.limbs, self.as_limbs(), rhs.as_limbs());
-        if BITS > 0 {
-            result.limbs[LIMBS - 1] &= Self::MASK;
-        }
+        result.apply_mask();
         result
     }
 
@@ -99,7 +97,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
             result *= Self::from(2) - self * result;
             correct_limbs *= 2;
         }
-        result.limbs[LIMBS - 1] &= Self::MASK;
+        result.apply_mask();
 
         Some(result)
     }
@@ -158,7 +156,7 @@ impl<const BITS: usize, const LIMBS: usize> Product<Self> for Uint<BITS, LIMBS> 
         if BITS == 0 {
             return Self::ZERO;
         }
-        iter.fold(Self::from(1), Self::wrapping_mul)
+        iter.fold(Self::ONE, Self::wrapping_mul)
     }
 }
 
@@ -171,7 +169,7 @@ impl<'a, const BITS: usize, const LIMBS: usize> Product<&'a Self> for Uint<BITS,
         if BITS == 0 {
             return Self::ZERO;
         }
-        iter.copied().fold(Self::from(1), Self::wrapping_mul)
+        iter.copied().fold(Self::ONE, Self::wrapping_mul)
     }
 }
 

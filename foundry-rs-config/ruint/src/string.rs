@@ -1,6 +1,6 @@
 #![allow(clippy::missing_inline_in_public_items)] // allow format functions
 
-use crate::{base_convert::BaseConvertError, Uint};
+use crate::{Uint, base_convert::BaseConvertError};
 use core::{fmt, str::FromStr};
 
 /// Error for [`from_str_radix`](Uint::from_str_radix).
@@ -106,8 +106,7 @@ impl<const BITS: usize, const LIMBS: usize> FromStr for Uint<BITS, LIMBS> {
     type Err = ParseError;
 
     fn from_str(src: &str) -> Result<Self, Self::Err> {
-        let (src, radix) = if src.is_char_boundary(2) {
-            let (prefix, rest) = src.split_at(2);
+        let (src, radix) = if let Some((prefix, rest)) = src.split_at_checked(2) {
             match prefix {
                 "0x" | "0X" => (rest, 16),
                 "0o" | "0O" => (rest, 8),

@@ -7,6 +7,7 @@
 use crate::Uint;
 use core::ops::{Shl, Shr};
 use num_traits::{
+    CheckedEuclid, Euclid, Inv, MulAdd, MulAddAssign, Num, NumCast,
     bounds::Bounded,
     cast::{FromPrimitive, ToPrimitive},
     identities::{One, Zero},
@@ -23,7 +24,6 @@ use num_traits::{
     },
     pow::Pow,
     sign::Unsigned,
-    CheckedEuclid, Euclid, Inv, MulAdd, MulAddAssign, Num, NumCast,
 };
 
 #[cfg(not(feature = "std"))]
@@ -42,14 +42,14 @@ impl<const BITS: usize, const LIMBS: usize> Zero for Uint<BITS, LIMBS> {
 
     #[inline(always)]
     fn is_zero(&self) -> bool {
-        self == &Self::ZERO
+        self.is_zero()
     }
 }
 
 impl<const BITS: usize, const LIMBS: usize> One for Uint<BITS, LIMBS> {
     #[inline(always)]
     fn one() -> Self {
-        Self::from(1)
+        Self::ONE
     }
 }
 
@@ -469,7 +469,7 @@ impl<const BITS: usize, const LIMBS: usize> PrimInt for Uint<BITS, LIMBS> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aliases::{U256, U64};
+    use crate::aliases::{U64, U256};
     use num_traits::bounds::{LowerBounded, UpperBounded};
 
     macro_rules! assert_impl{

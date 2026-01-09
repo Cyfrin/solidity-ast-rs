@@ -11,19 +11,23 @@
 
 [package]
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.75"
 name = "ark-ff"
-version = "0.4.2"
+version = "0.5.0"
 authors = ["arkworks contributors"]
+build = false
 include = [
     "Cargo.toml",
-    "build.rs",
     "src",
-    "doc",
     "README.md",
     "LICENSE-APACHE",
     "LICENSE-MIT",
+    "doc/katex-header.html",
 ]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "A library for finite fields"
 homepage = "https://arkworks.rs"
 documentation = "https://docs.rs/ark-ff/"
@@ -33,41 +37,44 @@ keywords = [
     "finite-fields",
 ]
 categories = ["cryptography"]
-license = "MIT/Apache-2.0"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/arkworks-rs/algebra"
-resolver = "1"
 
 [package.metadata.docs.rs]
-rustdoc-args = [
-    "--html-in-header",
-    "./doc/katex-header.html",
-]
+workspace = true
+
+[lib]
+name = "ark_ff"
+path = "src/lib.rs"
 
 [dependencies.ark-ff-asm]
-version = "0.4.2-alpha.1"
+version = "0.5.0"
 
 [dependencies.ark-ff-macros]
-version = "0.4.2-alpha.1"
+version = "0.5.0"
 
 [dependencies.ark-serialize]
-version = "0.4.2-alpha.1"
+version = "0.5.0"
 default-features = false
 
 [dependencies.ark-std]
-version = "0.4.0"
+version = "0.5.0"
 default-features = false
 
-[dependencies.derivative]
-version = "2"
-features = ["use_core"]
+[dependencies.arrayvec]
+version = "0.7"
+default-features = false
 
 [dependencies.digest]
 version = "0.10"
 features = ["alloc"]
 default-features = false
 
+[dependencies.educe]
+version = "0.6.0"
+
 [dependencies.itertools]
-version = "0.10"
+version = "0.13"
 default-features = false
 
 [dependencies.num-bigint]
@@ -90,45 +97,6 @@ version = "1"
 features = ["zeroize_derive"]
 default-features = false
 
-[dev-dependencies.ark-test-curves]
-version = "0.4.2-alpha.1"
-features = [
-    "bls12_381_curve",
-    "mnt6_753",
-    "secp256k1",
-]
-default-features = false
-
-[dev-dependencies.blake2]
-version = "0.10"
-default-features = false
-
-[dev-dependencies.hex]
-version = "0.4"
-
-[dev-dependencies.libtest-mimic]
-version = "0.6.0"
-
-[dev-dependencies.serde]
-version = "1.0.110"
-
-[dev-dependencies.serde_derive]
-version = "1.0.110"
-
-[dev-dependencies.serde_json]
-version = "1.0.53"
-
-[dev-dependencies.sha2]
-version = "0.10"
-default-features = false
-
-[dev-dependencies.sha3]
-version = "0.10"
-default-features = false
-
-[build-dependencies.rustc_version]
-version = "0.4"
-
 [features]
 asm = []
 default = []
@@ -136,6 +104,7 @@ parallel = [
     "std",
     "rayon",
     "ark-std/parallel",
+    "ark-serialize/parallel",
 ]
 std = [
     "ark-std/std",

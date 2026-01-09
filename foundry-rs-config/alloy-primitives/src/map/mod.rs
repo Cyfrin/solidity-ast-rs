@@ -8,9 +8,7 @@
 //!   enabled.
 //! - The previously-listed hash map types prefixed with `Fb`. These are type aliases with
 //!   [`FixedBytes<N>`][fb] as the key, and [`FbBuildHasher`] as the hasher builder. This hasher is
-//!   optimized for hashing fixed-size byte arrays, and wraps around the default hasher builder. It
-//!   performs best when the hasher is `fxhash`, which is enabled by default with the "map-fxhash"
-//!   feature.
+//!   optimized for hashing fixed-size byte arrays.
 //! - The previously-listed hash map types prefixed with [`Selector`], [`Address`], and [`B256`].
 //!   These use [`FbBuildHasher`] with the respective fixed-size byte array as the key. See the
 //!   previous point for more information.
@@ -31,6 +29,9 @@
 
 use cfg_if::cfg_if;
 
+mod hasher;
+pub use hasher::*;
+
 mod fixed;
 pub use fixed::*;
 
@@ -39,14 +40,29 @@ pub use fixed::*;
 cfg_if! {
     if #[cfg(any(feature = "map-hashbrown", not(feature = "std")))] {
         use hashbrown as imp;
+
+        /// A view into a single entry in a map, which may either be vacant or occupied.
+        ///
+        /// See [`Entry`](imp::hash_map::Entry) for more information.
+        pub type Entry<'a, K, V, S = DefaultHashBuilder> = imp::hash_map::Entry<'a, K, V, S>;
+        /// A view into an occupied entry in a `HashMap`. It is part of the [`Entry`] enum.
+        ///
+        /// See [`OccupiedEntry`](imp::hash_map::OccupiedEntry) for more information.
+        pub type OccupiedEntry<'a, K, V, S = DefaultHashBuilder> = imp::hash_map::OccupiedEntry<'a, K, V, S>;
+        /// A view into a vacant entry in a `HashMap`. It is part of the [`Entry`] enum.
+        ///
+        /// See [`VacantEntry`](imp::hash_map::VacantEntry) for more information.
+        pub type VacantEntry<'a, K, V, S = DefaultHashBuilder> = imp::hash_map::VacantEntry<'a, K, V, S>;
     } else {
         use hashbrown as _;
         use std::collections as imp;
+        #[doc(no_inline)]
+        pub use imp::hash_map::{Entry, OccupiedEntry, VacantEntry};
     }
 }
 
 #[doc(no_inline)]
-pub use imp::{hash_map, hash_map::Entry, hash_set};
+pub use imp::{hash_map, hash_set};
 
 /// A [`HashMap`](imp::HashMap) using the [default hasher](DefaultHasher).
 ///
@@ -56,54 +72,6 @@ pub type HashMap<K, V, S = DefaultHashBuilder> = imp::HashMap<K, V, S>;
 ///
 /// See [`HashSet`](imp::HashSet) for more information.
 pub type HashSet<V, S = DefaultHashBuilder> = imp::HashSet<V, S>;
-
-// Faster hashers.
-cfg_if! {
-    if #[cfg(feature = "map-fxhash")] {
-        #[doc(no_inline)]
-        pub use rustc_hash::{self, FxHasher};
-
-        cfg_if! {
-            if #[cfg(all(feature = "std", feature = "rand"))] {
-                use rustc_hash::FxRandomState as FxBuildHasherInner;
-            } else {
-                use rustc_hash::FxBuildHasher as FxBuildHasherInner;
-            }
-        }
-
-        /// The [`FxHasher`] hasher builder.
-        ///
-        /// This is [`rustc_hash::FxBuildHasher`], unless both the "std" and "rand" features are
-        /// enabled, in which case it will be [`rustc_hash::FxRandomState`] for better security at
-        /// very little cost.
-        pub type FxBuildHasher = FxBuildHasherInner;
-    }
-}
-
-#[cfg(feature = "map-foldhash")]
-#[doc(no_inline)]
-pub use foldhash;
-
-// Default hasher.
-cfg_if! {
-    if #[cfg(feature = "map-foldhash")] {
-        type DefaultHashBuilderInner = foldhash::fast::RandomState;
-    } else if #[cfg(feature = "map-fxhash")] {
-        type DefaultHashBuilderInner = FxBuildHasher;
-    } else if #[cfg(any(feature = "map-hashbrown", not(feature = "std")))] {
-        type DefaultHashBuilderInner = hashbrown::DefaultHashBuilder;
-    } else {
-        type DefaultHashBuilderInner = std::collections::hash_map::RandomState;
-    }
-}
-/// The default [`BuildHasher`](core::hash::BuildHasher) used by [`HashMap`] and [`HashSet`].
-///
-/// See [the module documentation](self) for more information on the default hasher.
-pub type DefaultHashBuilder = DefaultHashBuilderInner;
-/// The default [`Hasher`](core::hash::Hasher) used by [`HashMap`] and [`HashSet`].
-///
-/// See [the module documentation](self) for more information on the default hasher.
-pub type DefaultHasher = <DefaultHashBuilder as core::hash::BuildHasher>::Hasher;
 
 // `indexmap` re-exports.
 cfg_if! {
@@ -161,5 +129,28 @@ mod tests {
 
         <DefaultHasher as core::hash::Hasher>::write_u8(&mut hasher, 0);
         let _hasher2 = <DefaultHasher as Clone>::clone(&hasher);
+    }
+
+    // Check that the `Entry` types are correct.
+    fn use_entry(e: Entry<'_, u32, u64>) -> u64 {
+        match e {
+            Entry::Occupied(o) => {
+                let o: OccupiedEntry<'_, u32, u64> = o;
+                *o.get()
+            }
+            Entry::Vacant(v) => {
+                let v: VacantEntry<'_, u32, u64> = v;
+                *v.insert(0)
+            }
+        }
+    }
+
+    #[test]
+    fn test_entry() {
+        let mut map = HashMap::<u32, u64>::default();
+        map.insert(1, 1);
+        assert_eq!(use_entry(map.entry(0)), 0);
+        assert_eq!(use_entry(map.entry(1)), 1);
+        assert_eq!(use_entry(map.entry(2)), 0);
     }
 }

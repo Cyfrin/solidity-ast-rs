@@ -1,24 +1,25 @@
-use core::iter;
-
+use crate::{
+    AdditiveGroup, BigInt, BigInteger, FftField, Field, LegendreSymbol, One, PrimeField,
+    SqrtPrecomputation, Zero,
+};
 use ark_serialize::{
     buffer_byte_size, CanonicalDeserialize, CanonicalDeserializeWithFlags, CanonicalSerialize,
     CanonicalSerializeWithFlags, Compress, EmptyFlags, Flags, SerializationError, Valid, Validate,
 };
 use ark_std::{
-    cmp::{Ord, Ordering, PartialOrd},
+    cmp::*,
     fmt::{Display, Formatter, Result as FmtResult},
     marker::PhantomData,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     str::FromStr,
-    string::ToString,
-    One, Zero,
+    string::*,
 };
+use core::iter;
 
 #[macro_use]
 mod montgomery_backend;
 pub use montgomery_backend::*;
 
-use crate::{BigInt, BigInteger, FftField, Field, LegendreSymbol, PrimeField, SqrtPrecomputation};
 /// A trait that specifies the configuration of a prime field.
 /// Also specifies how to perform arithmetic on field elements.
 pub trait FpConfig<const N: usize>: Send + Sync + 'static + Sized {
@@ -82,7 +83,7 @@ pub trait FpConfig<const N: usize>: Send + Sync + 'static + Sized {
     /// Compute the inner product `<a, b>`.
     fn sum_of_products<const T: usize>(a: &[Fp<Self, N>; T], b: &[Fp<Self, N>; T]) -> Fp<Self, N>;
 
-    /// Set a *= b.
+    /// Set a *= a.
     fn square_in_place(a: &mut Fp<Self, N>);
 
     /// Compute a^{-1} if `a` is not zero.
@@ -100,20 +101,14 @@ pub trait FpConfig<const N: usize>: Send + Sync + 'static + Sized {
 
 /// Represents an element of the prime field F_p, where `p == P::MODULUS`.
 /// This type can represent elements in any field of size at most N * 64 bits.
-#[derive(Derivative)]
-#[derivative(
-    Default(bound = ""),
-    Hash(bound = ""),
-    Clone(bound = ""),
-    Copy(bound = ""),
-    PartialEq(bound = ""),
-    Eq(bound = "")
-)]
+#[derive(Educe)]
+#[educe(Default, Hash, Clone, Copy, PartialEq, Eq)]
 pub struct Fp<P: FpConfig<N>, const N: usize>(
-    pub BigInt<N>,
-    #[derivative(Debug = "ignore")]
+    /// Contains the element in Montgomery form for efficient multiplication.
+    /// To convert an element to a [`BigInt`](struct@BigInt), use `into_bigint` or `into`.
     #[doc(hidden)]
-    pub PhantomData<P>,
+    pub BigInt<N>,
+    #[doc(hidden)] pub PhantomData<P>,
 );
 
 pub type Fp64<P> = Fp<P, 1>;
@@ -186,32 +181,9 @@ impl<P: FpConfig<N>, const N: usize> One for Fp<P, N> {
     }
 }
 
-impl<P: FpConfig<N>, const N: usize> Field for Fp<P, N> {
-    type BasePrimeField = Self;
-    type BasePrimeFieldIter = iter::Once<Self::BasePrimeField>;
-
-    const SQRT_PRECOMP: Option<SqrtPrecomputation<Self>> = P::SQRT_PRECOMP;
+impl<P: FpConfig<N>, const N: usize> AdditiveGroup for Fp<P, N> {
+    type Scalar = Self;
     const ZERO: Self = P::ZERO;
-    const ONE: Self = P::ONE;
-
-    fn extension_degree() -> u64 {
-        1
-    }
-
-    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
-        elem
-    }
-
-    fn to_base_prime_field_elements(&self) -> Self::BasePrimeFieldIter {
-        iter::once(*self)
-    }
-
-    fn from_base_prime_field_elems(elems: &[Self::BasePrimeField]) -> Option<Self> {
-        if elems.len() != (Self::extension_degree() as usize) {
-            return None;
-        }
-        Some(elems[0])
-    }
 
     #[inline]
     fn double(&self) -> Self {
@@ -230,6 +202,36 @@ impl<P: FpConfig<N>, const N: usize> Field for Fp<P, N> {
     fn neg_in_place(&mut self) -> &mut Self {
         P::neg_in_place(self);
         self
+    }
+}
+
+impl<P: FpConfig<N>, const N: usize> Field for Fp<P, N> {
+    type BasePrimeField = Self;
+
+    const SQRT_PRECOMP: Option<SqrtPrecomputation<Self>> = P::SQRT_PRECOMP;
+    const ONE: Self = P::ONE;
+
+    fn extension_degree() -> u64 {
+        1
+    }
+
+    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
+        elem
+    }
+
+    fn to_base_prime_field_elements(&self) -> impl Iterator<Item = Self::BasePrimeField> {
+        iter::once(*self)
+    }
+
+    fn from_base_prime_field_elems(
+        elems: impl IntoIterator<Item = Self::BasePrimeField>,
+    ) -> Option<Self> {
+        let mut elems = elems.into_iter();
+        let elem = elems.next()?;
+        if elems.next().is_some() {
+            return None;
+        }
+        Some(elem)
     }
 
     #[inline]
@@ -331,6 +333,12 @@ impl<P: FpConfig<N>, const N: usize> Field for Fp<P, N> {
         } else {
             QuadraticNonResidue
         }
+    }
+
+    /// Fp is already a "BasePrimeField", so it's just mul by self
+    #[inline]
+    fn mul_by_base_prime_field(&self, elem: &Self::BasePrimeField) -> Self {
+        *self * elem
     }
 }
 
@@ -641,45 +649,20 @@ impl<P: FpConfig<N>, const N: usize> FromStr for Fp<P, N> {
     /// Interpret a string of numbers as a (congruent) prime field element.
     /// Does not accept unnecessary leading zeroes or a blank string.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Err(());
+        use num_bigint::{BigInt, BigUint};
+        use num_traits::Signed;
+
+        let modulus = BigInt::from(P::MODULUS);
+        let mut a = BigInt::from_str(s).map_err(|_| ())? % &modulus;
+        if a.is_negative() {
+            a += modulus
         }
-
-        if s == "0" {
-            return Ok(Self::zero());
-        }
-
-        let mut res = Self::zero();
-
-        let ten = Self::from(BigInt::from(10u8));
-
-        let mut first_digit = true;
-
-        for c in s.chars() {
-            match c.to_digit(10) {
-                Some(c) => {
-                    if first_digit {
-                        if c == 0 {
-                            return Err(());
-                        }
-
-                        first_digit = false;
-                    }
-
-                    res.mul_assign(&ten);
-                    let digit = Self::from(u64::from(c));
-                    res.add_assign(&digit);
-                },
-                None => {
-                    return Err(());
-                },
-            }
-        }
-        if res.is_geq_modulus() {
-            Err(())
-        } else {
-            Ok(res)
-        }
+        BigUint::try_from(a)
+            .map_err(|_| ())
+            .and_then(TryFrom::try_from)
+            .ok()
+            .and_then(Self::from_bigint)
+            .ok_or(())
     }
 }
 
@@ -689,7 +672,7 @@ impl<P: FpConfig<N>, const N: usize> Display for Fp<P, N> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         let string = self.into_bigint().to_string();
-        write!(f, "{}", string.trim_start_matches('0'))
+        write!(f, "{}", string)
     }
 }
 

@@ -1,16 +1,48 @@
+use std::borrow::Cow;
+
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{quote, quote_spanned, ToTokens};
+use syn::spanned::Spanned;
 
 use crate::ast::{Data, Fields, Style};
 use crate::codegen::{Field, OuterFromImpl, TraitImpl, Variant};
+use crate::util::Callable;
 
 pub struct FromMetaImpl<'a> {
     pub base: TraitImpl<'a>,
+    pub from_word: Option<Cow<'a, Callable>>,
+    pub from_none: Option<&'a Callable>,
+    pub from_expr: Option<&'a Callable>,
+    pub derive_syn_parse: bool,
 }
 
-impl<'a> ToTokens for FromMetaImpl<'a> {
+impl ToTokens for FromMetaImpl<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let base = &self.base;
+
+        let from_word = self.from_word.as_ref().map(|body| {
+            quote_spanned! {body.span()=>
+                fn from_word() -> ::darling::Result<Self> {
+                    ::darling::export::identity::<fn() -> ::darling::Result<Self>>(#body)()
+                }
+            }
+        });
+
+        let from_none = self.from_none.map(|body| {
+            quote_spanned! {body.span()=>
+                fn from_none() -> ::darling::export::Option<Self> {
+                    ::darling::export::identity::<fn() -> ::darling::export::Option<Self>>(#body)()
+                }
+            }
+        });
+
+        let from_expr = self.from_expr.map(|body| {
+            quote_spanned! {body.span()=>
+                fn from_expr(expr: &::darling::export::syn::Expr) -> ::darling::Result<Self> {
+                    ::darling::export::identity::<fn(&::darling::export::syn::Expr) -> ::darling::Result<Self>>(#body)(expr)
+                }
+            }
+        });
 
         let impl_block = match base.data {
             // Unit structs allow empty bodies only.
@@ -55,6 +87,12 @@ impl<'a> ToTokens for FromMetaImpl<'a> {
                 let post_transform = base.post_transform_call();
 
                 quote!(
+                    #from_word
+
+                    #from_none
+
+                    #from_expr
+
                     fn from_list(__items: &[::darling::export::NestedMeta]) -> ::darling::Result<Self> {
 
                         #decls
@@ -78,33 +116,27 @@ impl<'a> ToTokens for FromMetaImpl<'a> {
             Data::Enum(ref variants) => {
                 let unit_arms = variants.iter().map(Variant::as_unit_match_arm);
 
-                let unknown_variant_err = if !variants.is_empty() {
+                let (unknown_variant_err, unknown_unit_variant_err) = if !variants.is_empty() {
                     let names = variants.iter().map(Variant::as_name);
-                    quote! {
-                        unknown_field_with_alts(__other, &[#(#names),*])
-                    }
+                    let names = quote!(&[#(#names),*]);
+                    (
+                        quote! {
+                            unknown_field_with_alts(__other, #names)
+                        },
+                        quote! {
+                            unknown_value_with_alts(__other, #names)
+                        },
+                    )
                 } else {
-                    quote! {
-                        unknown_field(__other)
-                    }
+                    (
+                        quote! {
+                            unknown_field(__other)
+                        },
+                        quote!(unknown_value(__other)),
+                    )
                 };
 
-                let word_or_err = variants
-                    .iter()
-                    .find_map(|variant| {
-                        if variant.word {
-                            let ty_ident = variant.ty_ident;
-                            let variant_ident = variant.variant_ident;
-                            Some(quote!(::darling::export::Ok(#ty_ident::#variant_ident)))
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_else(|| {
-                        quote!(::darling::export::Err(
-                            ::darling::Error::unsupported_format("word")
-                        ))
-                    });
+                let data_variants = variants.iter().map(Variant::as_data_match_arm);
 
                 quote!(
                     fn from_list(__outer: &[::darling::export::NestedMeta]) -> ::darling::Result<Self> {
@@ -115,7 +147,7 @@ impl<'a> ToTokens for FromMetaImpl<'a> {
                             1 => {
                                 if let ::darling::export::NestedMeta::Meta(ref __nested) = __outer[0] {
                                     match ::darling::util::path_to_string(__nested.path()).as_ref() {
-                                        #(#variants)*
+                                        #(#data_variants)*
                                         __other => ::darling::export::Err(::darling::Error::#unknown_variant_err.with_span(__nested))
                                     }
                                 } else {
@@ -129,18 +161,23 @@ impl<'a> ToTokens for FromMetaImpl<'a> {
                     fn from_string(lit: &str) -> ::darling::Result<Self> {
                         match lit {
                             #(#unit_arms)*
-                            __other => ::darling::export::Err(::darling::Error::unknown_value(__other))
+                            __other => ::darling::export::Err(::darling::Error::#unknown_unit_variant_err)
                         }
                     }
 
-                    fn from_word() -> ::darling::Result<Self> {
-                        #word_or_err
-                    }
+                    #from_word
+
+                    #from_none
+
+                    #from_expr
                 )
             }
         };
 
         self.wrap(impl_block, tokens);
+        if self.derive_syn_parse {
+            ParseImpl(self).to_tokens(tokens);
+        }
     }
 }
 
@@ -151,5 +188,41 @@ impl<'a> OuterFromImpl<'a> for FromMetaImpl<'a> {
 
     fn base(&'a self) -> &'a TraitImpl<'a> {
         &self.base
+    }
+}
+
+struct ParseImpl<'a>(&'a FromMetaImpl<'a>);
+
+impl<'a> OuterFromImpl<'a> for ParseImpl<'a> {
+    fn trait_path(&self) -> syn::Path {
+        path!(::darling::export::syn::parse::Parse)
+    }
+
+    fn base(&'a self) -> &'a TraitImpl<'a> {
+        &self.0.base
+    }
+
+    fn trait_bound(&self) -> syn::Path {
+        // Since the Parse impl delegates to FromMeta, that's the
+        // trait bound we need to apply.
+        self.0.trait_path()
+    }
+}
+
+impl ToTokens for ParseImpl<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let from_meta = self.0.trait_path();
+        let impl_block = quote! {
+            fn parse(input: ::darling::export::syn::parse::ParseStream<'_>) -> ::darling::export::syn::Result<Self> {
+                use ::darling::export::IntoIterator;
+
+                let items = ::darling::export::syn::punctuated::Punctuated::<::darling::export::NestedMeta, ::darling::export::syn::Token![,]>::parse_terminated(input)?
+                    .into_iter()
+                    .collect::<::darling::export::Vec<_>>();
+                <Self as #from_meta>::from_list(&items).map_err(::darling::export::Into::into)
+            }
+        };
+
+        self.wrap(impl_block, tokens);
     }
 }

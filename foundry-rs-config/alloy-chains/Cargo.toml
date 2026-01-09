@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.85"
 name = "alloy-chains"
-version = "0.1.64"
+version = "0.2.25"
 authors = ["Alloy Contributors"]
 build = false
 autolib = false
@@ -69,7 +69,7 @@ name = "alloy_chains"
 path = "src/lib.rs"
 
 [dependencies.alloy-primitives]
-version = "0.8.18"
+version = "1.0"
 default-features = false
 
 [dependencies.alloy-rlp]

@@ -13,14 +13,29 @@
 edition = "2021"
 rust-version = "1.56"
 name = "darling_core"
-version = "0.20.10"
+version = "0.21.3"
 authors = ["Ted Driggs <ted.driggs@outlook.com>"]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = """
 Helper crate for proc-macro library for reading attributes into structs when
 implementing custom derives. Use https://crates.io/crates/darling in your code.
 """
+readme = false
 license = "MIT"
 repository = "https://github.com/TedDriggs/darling"
+
+[features]
+diagnostics = []
+suggestions = ["strsim"]
+
+[lib]
+name = "darling_core"
+path = "src/lib.rs"
 
 [dependencies.fnv]
 version = "1.0.7"
@@ -29,10 +44,14 @@ version = "1.0.7"
 version = "1.0.1"
 
 [dependencies.proc-macro2]
-version = "1.0.37"
+version = "1.0.86"
 
 [dependencies.quote]
 version = "1.0.18"
+
+[dependencies.serde]
+version = "1.0.210"
+optional = true
 
 [dependencies.strsim]
 version = "0.11.1"
@@ -45,6 +64,5 @@ features = [
     "extra-traits",
 ]
 
-[features]
-diagnostics = []
-suggestions = ["strsim"]
+[dev-dependencies.serde_json]
+version = "1.0.140"

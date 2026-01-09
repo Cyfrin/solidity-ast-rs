@@ -24,7 +24,7 @@ use std::fs::create_dir_all;
 use std::io::{self, copy, prelude::*, sink, SeekFrom};
 use std::mem;
 use std::mem::size_of;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -34,9 +34,6 @@ pub use config::*;
 
 /// Provides high level API for reading from a stream.
 pub(crate) mod stream;
-
-#[cfg(feature = "lzma")]
-pub(crate) mod lzma;
 
 pub(crate) mod magic_finder;
 
@@ -190,10 +187,7 @@ impl<'a, R: Read> CryptoReader<'a, R> {
 
 #[cold]
 fn invalid_state<T>() -> io::Result<T> {
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        "ZipFileReader was in an invalid state",
-    ))
+    Err(io::Error::other("ZipFileReader was in an invalid state"))
 }
 
 pub(crate) enum ZipFileReader<'a, R: Read> {
@@ -242,7 +236,7 @@ impl<'a, R: Read> ZipFileReader<'a, R> {
             ZipFileReader::NoReader => invalid_state(),
             ZipFileReader::Raw(r) => Ok(r),
             ZipFileReader::Compressed(r) => {
-                Ok(r.into_inner().into_inner().into_inner().into_inner())
+                Ok(r.into_inner().into_inner()?.into_inner().into_inner())
             }
         }
     }
@@ -301,7 +295,7 @@ impl<R: Seek> Seek for SeekableTake<'_, R> {
                     .inner
                     .seek(SeekFrom::Start(self.inner_starting_offset + clamped_offset))?;
                 self.current_offset = new_inner_offset - self.inner_starting_offset;
-                Ok(new_inner_offset)
+                Ok(self.current_offset)
             }
         }
     }
@@ -502,9 +496,6 @@ impl<'a> TryFrom<&'a CentralDirectoryEndInfo> for CentralDirectoryInfo {
                 Some(DataAndPosition { data: eocd64, .. }) => {
                     if eocd64.number_of_files_on_this_disk > eocd64.number_of_files {
                         return Err(invalid!("ZIP64 footer indicates more files on this disk than in the whole archive"));
-                    } else if eocd64.version_needed_to_extract > eocd64.version_made_by {
-                        return Err(invalid!("ZIP64 footer indicates a new version is needed to extract this archive than the \
-                                                         version that wrote it"));
                     }
                     (
                         eocd64.central_directory_offset,
@@ -975,6 +966,28 @@ impl<R: Read + Seek> ZipArchive<R> {
         self.shared.files.keys().map(|s| s.as_ref())
     }
 
+    /// Returns Ok(true) if any compressed data in this archive belongs to more than one file. This
+    /// doesn't make the archive invalid, but some programs will refuse to decompress it because the
+    /// copies would take up space independently in the destination.
+    pub fn has_overlapping_files(&mut self) -> ZipResult<bool> {
+        let mut ranges = Vec::<Range<u64>>::with_capacity(self.shared.files.len());
+        for file in self.shared.files.values() {
+            if file.compressed_size == 0 {
+                continue;
+            }
+            let start = file.data_start(&mut self.reader)?;
+            let end = start + file.compressed_size;
+            if ranges
+                .iter()
+                .any(|range| range.start <= end && start <= range.end)
+            {
+                return Ok(true);
+            }
+            ranges.push(start..end);
+        }
+        Ok(false)
+    }
+
     /// Search for a file entry by name, decrypt with given password
     ///
     /// # Warning
@@ -988,12 +1001,12 @@ impl<R: Read + Seek> ZipArchive<R> {
     /// There are many passwords out there that will also pass the validity checks
     /// we are able to perform. This is a weakness of the ZipCrypto algorithm,
     /// due to its fairly primitive approach to cryptography.
-    pub fn by_name_decrypt(&mut self, name: &str, password: &[u8]) -> ZipResult<ZipFile<R>> {
+    pub fn by_name_decrypt(&mut self, name: &str, password: &[u8]) -> ZipResult<ZipFile<'_, R>> {
         self.by_name_with_optional_password(name, Some(password))
     }
 
     /// Search for a file entry by name
-    pub fn by_name(&mut self, name: &str) -> ZipResult<ZipFile<R>> {
+    pub fn by_name(&mut self, name: &str) -> ZipResult<ZipFile<'_, R>> {
         self.by_name_with_optional_password(name, None)
     }
 
@@ -1019,12 +1032,12 @@ impl<R: Read + Seek> ZipArchive<R> {
     }
 
     /// Search for a file entry by name and return a seekable object.
-    pub fn by_name_seek(&mut self, name: &str) -> ZipResult<ZipFileSeek<R>> {
+    pub fn by_name_seek(&mut self, name: &str) -> ZipResult<ZipFileSeek<'_, R>> {
         self.by_index_seek(self.index_for_name(name).ok_or(ZipError::FileNotFound)?)
     }
 
     /// Search for a file entry by index and return a seekable object.
-    pub fn by_index_seek(&mut self, index: usize) -> ZipResult<ZipFileSeek<R>> {
+    pub fn by_index_seek(&mut self, index: usize) -> ZipResult<ZipFileSeek<'_, R>> {
         let reader = &mut self.reader;
         self.shared
             .files
@@ -1241,12 +1254,6 @@ pub(crate) fn central_header_to_zip_file<R: Read + Seek>(
     )?;
 
     let central_header_end = reader.stream_position()?;
-
-    if file.header_start >= central_directory.directory_start {
-        return Err(invalid!(
-            "A local file entry can't start after the central directory"
-        ));
-    }
 
     reader.seek(SeekFrom::Start(central_header_end))?;
     Ok(file)
@@ -1969,9 +1976,9 @@ mod test {
     fn invalid_offset() {
         use super::ZipArchive;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/invalid_offset.zip"));
-        let reader = ZipArchive::new(Cursor::new(v));
+        let reader = ZipArchive::new(Cursor::new(include_bytes!(
+            "../tests/data/invalid_offset.zip"
+        )));
         assert!(reader.is_err());
     }
 
@@ -1979,9 +1986,9 @@ mod test {
     fn invalid_offset2() {
         use super::ZipArchive;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/invalid_offset2.zip"));
-        let reader = ZipArchive::new(Cursor::new(v));
+        let reader = ZipArchive::new(Cursor::new(include_bytes!(
+            "../tests/data/invalid_offset2.zip"
+        )));
         assert!(reader.is_err());
     }
 
@@ -1989,9 +1996,8 @@ mod test {
     fn zip64_with_leading_junk() {
         use super::ZipArchive;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/zip64_demo.zip"));
-        let reader = ZipArchive::new(Cursor::new(v)).unwrap();
+        let reader =
+            ZipArchive::new(Cursor::new(include_bytes!("../tests/data/zip64_demo.zip"))).unwrap();
         assert_eq!(reader.len(), 1);
     }
 
@@ -1999,9 +2005,8 @@ mod test {
     fn zip_contents() {
         use super::ZipArchive;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/mimetype.zip"));
-        let mut reader = ZipArchive::new(Cursor::new(v)).unwrap();
+        let mut reader =
+            ZipArchive::new(Cursor::new(include_bytes!("../tests/data/mimetype.zip"))).unwrap();
         assert_eq!(reader.comment(), b"");
         assert_eq!(reader.by_index(0).unwrap().central_header_start(), 77);
     }
@@ -2010,9 +2015,7 @@ mod test {
     fn zip_read_streaming() {
         use super::read_zipfile_from_stream;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/mimetype.zip"));
-        let mut reader = Cursor::new(v);
+        let mut reader = Cursor::new(include_bytes!("../tests/data/mimetype.zip"));
         loop {
             if read_zipfile_from_stream(&mut reader).unwrap().is_none() {
                 break;
@@ -2025,9 +2028,8 @@ mod test {
         use super::ZipArchive;
         use std::io::Read;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/mimetype.zip"));
-        let mut reader1 = ZipArchive::new(Cursor::new(v)).unwrap();
+        let mut reader1 =
+            ZipArchive::new(Cursor::new(include_bytes!("../tests/data/mimetype.zip"))).unwrap();
         let mut reader2 = reader1.clone();
 
         let mut file1 = reader1.by_index(0).unwrap();
@@ -2065,9 +2067,10 @@ mod test {
     fn file_and_dir_predicates() {
         use super::ZipArchive;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/files_and_dirs.zip"));
-        let mut zip = ZipArchive::new(Cursor::new(v)).unwrap();
+        let mut zip = ZipArchive::new(Cursor::new(include_bytes!(
+            "../tests/data/files_and_dirs.zip"
+        )))
+        .unwrap();
 
         for i in 0..zip.len() {
             let zip_file = zip.by_index(i).unwrap();
@@ -2103,11 +2106,9 @@ mod test {
     fn invalid_cde_number_of_files_allocation_smaller_offset() {
         use super::ZipArchive;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!(
+        let reader = ZipArchive::new(Cursor::new(include_bytes!(
             "../tests/data/invalid_cde_number_of_files_allocation_smaller_offset.zip"
-        ));
-        let reader = ZipArchive::new(Cursor::new(v));
+        )));
         assert!(reader.is_err() || reader.unwrap().is_empty());
     }
 
@@ -2118,22 +2119,18 @@ mod test {
     fn invalid_cde_number_of_files_allocation_greater_offset() {
         use super::ZipArchive;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!(
+        let reader = ZipArchive::new(Cursor::new(include_bytes!(
             "../tests/data/invalid_cde_number_of_files_allocation_greater_offset.zip"
-        ));
-        let reader = ZipArchive::new(Cursor::new(v));
+        )));
         assert!(reader.is_err());
     }
 
     #[cfg(feature = "deflate64")]
     #[test]
     fn deflate64_index_out_of_bounds() -> std::io::Result<()> {
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!(
+        let mut reader = ZipArchive::new(Cursor::new(include_bytes!(
             "../tests/data/raw_deflate64_index_out_of_bounds.zip"
-        ));
-        let mut reader = ZipArchive::new(Cursor::new(v))?;
+        )))?;
         std::io::copy(&mut reader.by_index(0)?, &mut std::io::sink()).expect_err("Invalid file");
         Ok(())
     }
@@ -2141,19 +2138,21 @@ mod test {
     #[cfg(feature = "deflate64")]
     #[test]
     fn deflate64_not_enough_space() {
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/deflate64_issue_25.zip"));
-        ZipArchive::new(Cursor::new(v)).expect_err("Invalid file");
+        ZipArchive::new(Cursor::new(include_bytes!(
+            "../tests/data/deflate64_issue_25.zip"
+        )))
+        .expect_err("Invalid file");
     }
 
-    #[cfg(feature = "_deflate-any")]
+    #[cfg(feature = "deflate-flate2")]
     #[test]
     fn test_read_with_data_descriptor() {
         use std::io::Read;
 
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/data_descriptor.zip"));
-        let mut reader = ZipArchive::new(Cursor::new(v)).unwrap();
+        let mut reader = ZipArchive::new(Cursor::new(include_bytes!(
+            "../tests/data/data_descriptor.zip"
+        )))
+        .unwrap();
         let mut decompressed = [0u8; 16];
         let mut file = reader.by_index(0).unwrap();
         assert_eq!(file.read(&mut decompressed).unwrap(), 12);
@@ -2161,38 +2160,35 @@ mod test {
 
     #[test]
     fn test_is_symlink() -> std::io::Result<()> {
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/symlink.zip"));
-        let mut reader = ZipArchive::new(Cursor::new(v)).unwrap();
-        assert!(reader.by_index(0).unwrap().is_symlink());
+        let mut reader = ZipArchive::new(Cursor::new(include_bytes!("../tests/data/symlink.zip")))?;
+        assert!(reader.by_index(0)?.is_symlink());
         let tempdir = TempDir::with_prefix("test_is_symlink")?;
-        reader.extract(&tempdir).unwrap();
+        reader.extract(&tempdir)?;
         assert!(tempdir.path().join("bar").is_symlink());
         Ok(())
     }
 
     #[test]
-    #[cfg(feature = "_deflate-any")]
+    #[cfg(feature = "deflate-flate2")]
     fn test_utf8_extra_field() {
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/chinese.zip"));
-        let mut reader = ZipArchive::new(Cursor::new(v)).unwrap();
+        let mut reader =
+            ZipArchive::new(Cursor::new(include_bytes!("../tests/data/chinese.zip"))).unwrap();
         reader.by_name("七个房间.txt").unwrap();
     }
 
     #[test]
     fn test_utf8() {
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/linux-7z.zip"));
-        let mut reader = ZipArchive::new(Cursor::new(v)).unwrap();
+        let mut reader =
+            ZipArchive::new(Cursor::new(include_bytes!("../tests/data/linux-7z.zip"))).unwrap();
         reader.by_name("你好.txt").unwrap();
     }
 
     #[test]
     fn test_utf8_2() {
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/windows-7zip.zip"));
-        let mut reader = ZipArchive::new(Cursor::new(v)).unwrap();
+        let mut reader = ZipArchive::new(Cursor::new(include_bytes!(
+            "../tests/data/windows-7zip.zip"
+        )))
+        .unwrap();
         reader.by_name("你好.txt").unwrap();
     }
 
@@ -2236,8 +2232,7 @@ mod test {
         writer.add_symlink("symlink/", "../dest-sibling/", SimpleFileOptions::default())?;
         writer.start_file("symlink/dest-file", SimpleFileOptions::default())?;
         let mut reader = writer.finish_into_readable()?;
-        let dest_parent =
-            TempDir::with_prefix("read__test_cannot_symlink_outside_destination").unwrap();
+        let dest_parent = TempDir::with_prefix("read__test_cannot_symlink_outside_destination")?;
         let dest_sibling = dest_parent.path().join("dest-sibling");
         create_dir(&dest_sibling)?;
         let dest = dest_parent.path().join("dest");
@@ -2249,12 +2244,34 @@ mod test {
 
     #[test]
     fn test_can_create_destination() -> ZipResult<()> {
-        let mut v = Vec::new();
-        v.extend_from_slice(include_bytes!("../tests/data/mimetype.zip"));
-        let mut reader = ZipArchive::new(Cursor::new(v))?;
-        let dest = TempDir::with_prefix("read__test_can_create_destination").unwrap();
+        let mut reader =
+            ZipArchive::new(Cursor::new(include_bytes!("../tests/data/mimetype.zip")))?;
+        let dest = TempDir::with_prefix("read__test_can_create_destination")?;
         reader.extract(&dest)?;
         assert!(dest.path().join("mimetype").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_central_directory_not_at_end() -> ZipResult<()> {
+        let mut reader = ZipArchive::new(Cursor::new(include_bytes!("../tests/data/omni.ja")))?;
+        let mut file = reader.by_name("chrome.manifest")?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?; // ensures valid UTF-8
+        assert!(!contents.is_empty(), "chrome.manifest should not be empty");
+        drop(file);
+        for i in 0..reader.len() {
+            let mut file = reader.by_index(i)?;
+            // Attempt to read a small portion or all of each file to ensure it's accessible
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            assert_eq!(
+                buffer.len(),
+                file.size() as usize,
+                "File size mismatch for {}",
+                file.name()
+            );
+        }
         Ok(())
     }
 }

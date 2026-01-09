@@ -1,11 +1,9 @@
 #![allow(clippy::module_name_repetitions)]
 
-use crate::algorithms::{ops::sbb, DoubleWord};
+use crate::algorithms::{DoubleWord, borrowing_sub};
 
 /// ⚠️ Computes `result += a * b` and checks for overflow.
-///
-/// **Warning.** This function is not part of the stable API.
-///
+#[doc = crate::algorithms::unstable_warning!()]
 /// Arrays are in little-endian order. All arrays can be arbitrary sized.
 ///
 /// # Algorithm
@@ -31,8 +29,9 @@ pub fn addmul(mut lhs: &mut [u64], mut a: &[u64], mut b: &[u64]) -> bool {
             lhs = rest;
         }
     }
-    while let [rest @ .., 0] = a {
-        a = rest;
+    a = super::trim_end_zeros(a);
+    if a.is_empty() {
+        return false;
     }
 
     // Trim zeros from `b`
@@ -42,13 +41,11 @@ pub fn addmul(mut lhs: &mut [u64], mut a: &[u64], mut b: &[u64]) -> bool {
             lhs = rest;
         }
     }
-    while let [rest @ .., 0] = b {
-        b = rest;
-    }
-
-    if a.is_empty() || b.is_empty() {
+    b = super::trim_end_zeros(b);
+    if b.is_empty() {
         return false;
     }
+
     if lhs.is_empty() {
         return true;
     }
@@ -75,7 +72,39 @@ pub fn addmul(mut lhs: &mut [u64], mut a: &[u64], mut b: &[u64]) -> bool {
     overflow
 }
 
-/// Computes `lhs += a` and returns the carry.
+const ADDMUL_N_SMALL_LIMIT: usize = 8;
+
+/// ⚠️ Computes wrapping `result += a * b`, with a fast-path for when all inputs
+/// are the same length and small enough.
+#[doc = crate::algorithms::unstable_warning!()]
+/// See [`addmul`] for more details.
+#[inline(always)]
+pub fn addmul_n(lhs: &mut [u64], a: &[u64], b: &[u64]) {
+    let n = lhs.len();
+    if n <= ADDMUL_N_SMALL_LIMIT && a.len() == n && b.len() == n {
+        addmul_n_small(lhs, a, b);
+    } else {
+        let _ = addmul(lhs, a, b);
+    }
+}
+
+#[inline(always)]
+fn addmul_n_small(lhs: &mut [u64], a: &[u64], b: &[u64]) {
+    let n = lhs.len();
+    assume!(n <= ADDMUL_N_SMALL_LIMIT);
+    assume!(a.len() == n);
+    assume!(b.len() == n);
+
+    for j in 0..n {
+        let mut carry = 0;
+        for i in 0..(n - j) {
+            (lhs[j + i], carry) = u128::muladd2(a[i], b[j], carry, lhs[j + i]).split();
+        }
+    }
+}
+
+/// ⚠️ Computes `lhs += a` and returns the carry.
+#[doc = crate::algorithms::unstable_warning!()]
 #[inline(always)]
 pub fn add_nx1(lhs: &mut [u64], mut a: u64) -> u64 {
     if a == 0 {
@@ -90,95 +119,8 @@ pub fn add_nx1(lhs: &mut [u64], mut a: u64) -> u64 {
     a
 }
 
-/// Computes wrapping `lhs += a * b` when all arguments are the same length.
-///
-/// # Panics
-///
-/// Panics if the lengts are not the same.
-#[inline(always)]
-pub fn addmul_n(lhs: &mut [u64], a: &[u64], b: &[u64]) {
-    assert_eq!(lhs.len(), a.len());
-    assert_eq!(lhs.len(), b.len());
-    match lhs.len() {
-        0 => {}
-        1 => addmul_1(lhs, a, b),
-        2 => addmul_2(lhs, a, b),
-        3 => addmul_3(lhs, a, b),
-        4 => addmul_4(lhs, a, b),
-        _ => _ = addmul(lhs, a, b),
-    }
-}
-
-/// Computes `lhs += a * b` for 1 limb.
-#[inline(always)]
-fn addmul_1(lhs: &mut [u64], a: &[u64], b: &[u64]) {
-    assume!(lhs.len() == 1);
-    assume!(a.len() == 1);
-    assume!(b.len() == 1);
-
-    mac(&mut lhs[0], a[0], b[0], 0);
-}
-
-/// Computes `lhs += a * b` for 2 limbs.
-#[inline(always)]
-fn addmul_2(lhs: &mut [u64], a: &[u64], b: &[u64]) {
-    assume!(lhs.len() == 2);
-    assume!(a.len() == 2);
-    assume!(b.len() == 2);
-
-    let carry = mac(&mut lhs[0], a[0], b[0], 0);
-    mac(&mut lhs[1], a[0], b[1], carry);
-
-    mac(&mut lhs[1], a[1], b[0], 0);
-}
-
-/// Computes `lhs += a * b` for 3 limbs.
-#[inline(always)]
-fn addmul_3(lhs: &mut [u64], a: &[u64], b: &[u64]) {
-    assume!(lhs.len() == 3);
-    assume!(a.len() == 3);
-    assume!(b.len() == 3);
-
-    let carry = mac(&mut lhs[0], a[0], b[0], 0);
-    let carry = mac(&mut lhs[1], a[0], b[1], carry);
-    mac(&mut lhs[2], a[0], b[2], carry);
-
-    let carry = mac(&mut lhs[1], a[1], b[0], 0);
-    mac(&mut lhs[2], a[1], b[1], carry);
-
-    mac(&mut lhs[2], a[2], b[0], 0);
-}
-
-/// Computes `lhs += a * b` for 4 limbs.
-#[inline(always)]
-fn addmul_4(lhs: &mut [u64], a: &[u64], b: &[u64]) {
-    assume!(lhs.len() == 4);
-    assume!(a.len() == 4);
-    assume!(b.len() == 4);
-
-    let carry = mac(&mut lhs[0], a[0], b[0], 0);
-    let carry = mac(&mut lhs[1], a[0], b[1], carry);
-    let carry = mac(&mut lhs[2], a[0], b[2], carry);
-    mac(&mut lhs[3], a[0], b[3], carry);
-
-    let carry = mac(&mut lhs[1], a[1], b[0], 0);
-    let carry = mac(&mut lhs[2], a[1], b[1], carry);
-    mac(&mut lhs[3], a[1], b[2], carry);
-
-    let carry = mac(&mut lhs[2], a[2], b[0], 0);
-    mac(&mut lhs[3], a[2], b[1], carry);
-
-    mac(&mut lhs[3], a[3], b[0], 0);
-}
-
-#[inline(always)]
-fn mac(lhs: &mut u64, a: u64, b: u64, c: u64) -> u64 {
-    let prod = u128::muladd2(a, b, c, *lhs);
-    *lhs = prod.low();
-    prod.high()
-}
-
-/// Computes `lhs *= a` and returns the carry.
+/// ⚠️ Computes `lhs *= a` and returns the carry.
+#[doc = crate::algorithms::unstable_warning!()]
 #[inline(always)]
 pub fn mul_nx1(lhs: &mut [u64], a: u64) -> u64 {
     let mut carry = 0;
@@ -188,8 +130,8 @@ pub fn mul_nx1(lhs: &mut [u64], a: u64) -> u64 {
     carry
 }
 
-/// Computes `lhs += a * b` and returns the carry.
-///
+/// ⚠️ Computes `lhs += a * b` and returns the carry.
+#[doc = crate::algorithms::unstable_warning!()]
 /// Requires `lhs.len() == a.len()`.
 ///
 /// $$
@@ -208,8 +150,8 @@ pub fn addmul_nx1(lhs: &mut [u64], a: &[u64], b: u64) -> u64 {
     carry
 }
 
-/// Computes `lhs -= a * b` and returns the borrow.
-///
+/// ⚠️ Computes `lhs -= a * b` and returns the borrow.
+#[doc = crate::algorithms::unstable_warning!()]
 /// Requires `lhs.len() == a.len()`.
 ///
 /// $$
@@ -223,16 +165,16 @@ pub fn addmul_nx1(lhs: &mut [u64], a: &[u64], b: u64) -> u64 {
 pub fn submul_nx1(lhs: &mut [u64], a: &[u64], b: u64) -> u64 {
     assume!(lhs.len() == a.len());
     let mut carry = 0;
-    let mut borrow = 0;
+    let mut borrow = false;
     for i in 0..a.len() {
         // Compute product limbs
         let limb;
         (limb, carry) = u128::muladd(a[i], b, carry).split();
 
         // Subtract
-        (lhs[i], borrow) = sbb(lhs[i], limb, borrow);
+        (lhs[i], borrow) = borrowing_sub(lhs[i], limb, borrow);
     }
-    borrow + carry
+    borrow as u64 + carry
 }
 
 #[cfg(test)]

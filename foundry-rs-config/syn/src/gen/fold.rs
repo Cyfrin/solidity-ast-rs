@@ -7,6 +7,10 @@
     clippy::needless_match,
     clippy::needless_pass_by_ref_mut,
 )]
+#[cfg(any(feature = "derive", feature = "full"))]
+use alloc::boxed::Box;
+#[cfg(any(feature = "derive", feature = "full"))]
+use alloc::vec::Vec;
 #[cfg(feature = "full")]
 macro_rules! full {
     ($e:expr) => {
@@ -793,7 +797,7 @@ pub trait Fold {
         fold_signature(self, i)
     }
     fn fold_span(&mut self, i: proc_macro2::Span) -> proc_macro2::Span {
-        fold_span(self, i)
+        i
     }
     #[cfg(feature = "full")]
     #[cfg_attr(docsrs, doc(cfg(feature = "full")))]
@@ -812,6 +816,12 @@ pub trait Fold {
     #[cfg_attr(docsrs, doc(cfg(feature = "full")))]
     fn fold_stmt_macro(&mut self, i: crate::StmtMacro) -> crate::StmtMacro {
         fold_stmt_macro(self, i)
+    }
+    fn fold_token_stream(
+        &mut self,
+        i: proc_macro2::TokenStream,
+    ) -> proc_macro2::TokenStream {
+        i
     }
     #[cfg(any(feature = "derive", feature = "full"))]
     #[cfg_attr(docsrs, doc(cfg(any(feature = "derive", feature = "full"))))]
@@ -1418,7 +1428,9 @@ where
         crate::Expr::Unsafe(_binding_0) => {
             crate::Expr::Unsafe(full!(f.fold_expr_unsafe(_binding_0)))
         }
-        crate::Expr::Verbatim(_binding_0) => crate::Expr::Verbatim(_binding_0),
+        crate::Expr::Verbatim(_binding_0) => {
+            crate::Expr::Verbatim(f.fold_token_stream(_binding_0))
+        }
         crate::Expr::While(_binding_0) => {
             crate::Expr::While(full!(f.fold_expr_while(_binding_0)))
         }
@@ -2089,7 +2101,7 @@ where
             crate::ForeignItem::Macro(f.fold_foreign_item_macro(_binding_0))
         }
         crate::ForeignItem::Verbatim(_binding_0) => {
-            crate::ForeignItem::Verbatim(_binding_0)
+            crate::ForeignItem::Verbatim(f.fold_token_stream(_binding_0))
         }
     }
 }
@@ -2251,7 +2263,9 @@ where
         crate::ImplItem::Macro(_binding_0) => {
             crate::ImplItem::Macro(f.fold_impl_item_macro(_binding_0))
         }
-        crate::ImplItem::Verbatim(_binding_0) => crate::ImplItem::Verbatim(_binding_0),
+        crate::ImplItem::Verbatim(_binding_0) => {
+            crate::ImplItem::Verbatim(f.fold_token_stream(_binding_0))
+        }
     }
 }
 #[cfg(feature = "full")]
@@ -2389,7 +2403,9 @@ where
             crate::Item::Union(f.fold_item_union(_binding_0))
         }
         crate::Item::Use(_binding_0) => crate::Item::Use(f.fold_item_use(_binding_0)),
-        crate::Item::Verbatim(_binding_0) => crate::Item::Verbatim(_binding_0),
+        crate::Item::Verbatim(_binding_0) => {
+            crate::Item::Verbatim(f.fold_token_stream(_binding_0))
+        }
     }
 }
 #[cfg(feature = "full")]
@@ -2812,7 +2828,7 @@ where
         path: f.fold_path(node.path),
         bang_token: node.bang_token,
         delimiter: f.fold_macro_delimiter(node.delimiter),
-        tokens: node.tokens,
+        tokens: f.fold_token_stream(node.tokens),
     }
 }
 #[cfg(any(feature = "derive", feature = "full"))]
@@ -2874,7 +2890,7 @@ where
     crate::MetaList {
         path: f.fold_path(node.path),
         delimiter: f.fold_macro_delimiter(node.delimiter),
-        tokens: node.tokens,
+        tokens: f.fold_token_stream(node.tokens),
     }
 }
 #[cfg(any(feature = "derive", feature = "full"))]
@@ -2935,7 +2951,9 @@ where
             crate::Pat::TupleStruct(f.fold_pat_tuple_struct(_binding_0))
         }
         crate::Pat::Type(_binding_0) => crate::Pat::Type(f.fold_pat_type(_binding_0)),
-        crate::Pat::Verbatim(_binding_0) => crate::Pat::Verbatim(_binding_0),
+        crate::Pat::Verbatim(_binding_0) => {
+            crate::Pat::Verbatim(f.fold_token_stream(_binding_0))
+        }
         crate::Pat::Wild(_binding_0) => crate::Pat::Wild(f.fold_pat_wild(_binding_0)),
     }
 }
@@ -3366,7 +3384,9 @@ where
         crate::TraitItem::Macro(_binding_0) => {
             crate::TraitItem::Macro(f.fold_trait_item_macro(_binding_0))
         }
-        crate::TraitItem::Verbatim(_binding_0) => crate::TraitItem::Verbatim(_binding_0),
+        crate::TraitItem::Verbatim(_binding_0) => {
+            crate::TraitItem::Verbatim(f.fold_token_stream(_binding_0))
+        }
     }
 }
 #[cfg(feature = "full")]
@@ -3482,7 +3502,9 @@ where
         crate::Type::Tuple(_binding_0) => {
             crate::Type::Tuple(f.fold_type_tuple(_binding_0))
         }
-        crate::Type::Verbatim(_binding_0) => crate::Type::Verbatim(_binding_0),
+        crate::Type::Verbatim(_binding_0) => {
+            crate::Type::Verbatim(f.fold_token_stream(_binding_0))
+        }
     }
 }
 #[cfg(any(feature = "derive", feature = "full"))]
@@ -3607,7 +3629,7 @@ where
             )
         }
         crate::TypeParamBound::Verbatim(_binding_0) => {
-            crate::TypeParamBound::Verbatim(_binding_0)
+            crate::TypeParamBound::Verbatim(f.fold_token_stream(_binding_0))
         }
     }
 }

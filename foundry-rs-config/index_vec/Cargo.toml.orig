@@ -1,0 +1,22 @@
+[package]
+name = "index_vec"
+version = "0.1.4"
+authors = ["Thom Chiovoloni <chiovolonit@gmail.com>"]
+edition = "2018"
+description = "Newtype-style helpers for `Vec` and `usize`."
+license = "MIT/Apache-2.0"
+repository = "http://github.com/thomcc/index_vec"
+keywords = ["newtype", "vec", "index", "indexed", "usize"]
+categories = ["data-structures", "no-std", "rust-patterns"]
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1", optional = true }
+rkyv = { version = "0.7", optional = true }
+
+[features]
+example_generated = []
+default = []
+
+[package.metadata.docs.rs]
+features = ["example_generated"]

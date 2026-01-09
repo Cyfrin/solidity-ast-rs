@@ -1,10 +1,11 @@
 // TODO: https://baincapitalcrypto.com/optimizing-montgomery-multiplication-in-webassembly/
 
-use super::{borrowing_sub, carrying_add, cmp};
+use super::{DoubleWord, borrowing_sub, carrying_add, cmp};
+use crate::utils::select_unpredictable;
 use core::{cmp::Ordering, iter::zip};
 
-/// Computes a * b * 2^(-BITS) mod modulus
-///
+/// ⚠️ Computes a * b * 2^(-BITS) mod modulus
+#[doc = crate::algorithms::unstable_warning!()]
 /// Requires that `inv` is the inverse of `-modulus[0]` modulo `2^64`.
 /// Requires that `a` and `b` are less than `modulus`.
 #[inline]
@@ -60,8 +61,8 @@ pub fn mul_redc<const N: usize>(a: [u64; N], b: [u64; N], modulus: [u64; N], inv
     reduce1_carry(result, modulus, carry)
 }
 
-/// Computes a^2 * 2^(-BITS) mod modulus
-///
+/// ⚠️ Computes a^2 * 2^(-BITS) mod modulus
+#[doc = crate::algorithms::unstable_warning!()]
 /// Requires that `inv` is the inverse of `-modulus[0]` modulo `2^64`.
 /// Requires that `a` is less than `modulus`.
 #[inline]
@@ -127,13 +128,7 @@ pub fn square_redc<const N: usize>(a: [u64; N], modulus: [u64; N], inv: u64) -> 
 #[allow(clippy::needless_bitwise_bool)]
 fn reduce1_carry<const N: usize>(value: [u64; N], modulus: [u64; N], carry: bool) -> [u64; N] {
     let (reduced, borrow) = sub(value, modulus);
-    // TODO: Ideally this turns into a cmov, which makes the whole mul_redc constant
-    // time.
-    if carry | !borrow {
-        reduced
-    } else {
-        value
-    }
+    select_unpredictable(carry | !borrow, reduced, value)
 }
 
 #[inline]
@@ -154,12 +149,8 @@ fn sub<const N: usize>(lhs: [u64; N], rhs: [u64; N]) -> ([u64; N], bool) {
 #[inline]
 #[must_use]
 #[allow(clippy::cast_possible_truncation)]
-const fn carrying_mul_add(lhs: u64, rhs: u64, add: u64, carry: u64) -> (u64, u64) {
-    let wide = (lhs as u128)
-        .wrapping_mul(rhs as u128)
-        .wrapping_add(add as u128)
-        .wrapping_add(carry as u128);
-    (wide as u64, (wide >> 64) as u64)
+fn carrying_mul_add(lhs: u64, rhs: u64, add: u64, carry: u64) -> (u64, u64) {
+    u128::muladd2(lhs, rhs, add, carry).split()
 }
 
 /// Compute `2 * lhs * rhs + add + carry_lo + 2^64 * carry_hi`.
@@ -185,13 +176,12 @@ const fn carrying_double_mul_add(
 
 #[cfg(test)]
 mod test {
-    use core::ops::Neg;
-
     use super::{
         super::{addmul, div},
         *,
     };
-    use crate::{aliases::U64, const_for, nlimbs, Uint};
+    use crate::{Uint, aliases::U64, const_for, nlimbs};
+    use core::ops::Neg;
     use proptest::{prop_assert_eq, proptest};
 
     fn modmul<const N: usize>(a: [u64; N], b: [u64; N], modulus: [u64; N]) -> [u64; N] {
@@ -218,7 +208,7 @@ mod test {
 
     #[test]
     fn test_mul_redc() {
-        const_for!(BITS in NON_ZERO if (BITS >= 16) {
+        const_for!(BITS in NON_ZERO if BITS >= 16 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(mut a: U, mut b: U, mut m: U)| {
@@ -240,7 +230,7 @@ mod test {
 
     #[test]
     fn test_square_redc() {
-        const_for!(BITS in NON_ZERO if (BITS >= 16) {
+        const_for!(BITS in NON_ZERO if BITS >= 16 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(mut a: U, mut m: U)| {

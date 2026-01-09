@@ -1,0 +1,88 @@
+[package]
+name = "svm-rs"
+description = "Solidity compiler version manager"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "svm"
+
+[[bin]]
+name = "svm"
+path = "src/bin/svm-bin/main.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "solc"
+path = "src/bin/solc/main.rs"
+required-features = ["solc"]
+
+[build-dependencies]
+vergen = { version = "8", optional = true, features = [
+    "build",
+    "git",
+    "gitcl",
+] }
+
+[dependencies]
+hex.workspace = true
+dirs = "6.0"
+reqwest = { workspace = true, default-features = false, features = ["json"] }
+semver = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2 = "0.10"
+tempfile = "3.10"
+thiserror = ">=1.0, <3.0"
+url = "2.5"
+
+# CLI
+anyhow = { version = "1.0", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+console = { version = "0.16", default-features = false, optional = true }
+dialoguer = { version = "0.11", default-features = false, optional = true }
+indicatif = { version = "0.18", default-features = false, optional = true }
+itertools = { version = "0.14", optional = true }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+zip = { version = "4", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+rand = "0.9"
+tempfile = "3.10"
+tokio = { version = "1.36", features = ["rt-multi-thread", "macros"] }
+serial_test = "3.0"
+
+[features]
+default = ["rustls", "cli", "solc"]
+
+# lib
+openssl = ["reqwest/native-tls"]
+rustls = ["reqwest/rustls-tls", "reqwest/rustls-tls-native-roots"]
+blocking = ["reqwest/blocking"]
+
+# bin
+cli = [
+    "dep:anyhow",
+    "dep:clap",
+    "dep:console",
+    "dep:dialoguer",
+    "dep:indicatif",
+    "dep:itertools",
+    "dep:tokio",
+    "dep:vergen",
+]
+solc = ["dep:anyhow"]

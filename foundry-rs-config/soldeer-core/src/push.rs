@@ -9,9 +9,9 @@ use log::debug;
 use path_slash::{PathBufExt as _, PathExt as _};
 use regex::Regex;
 use reqwest::{
-    header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE},
-    multipart::{Form, Part},
     Client, StatusCode,
+    header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue},
+    multipart::{Form, Part},
 };
 use std::{
     fs,
@@ -19,7 +19,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
 };
-use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 pub type Result<T> = std::result::Result<T, PublishError>;
 
@@ -128,12 +128,13 @@ pub fn zip_file(
 
         // we add folders explicitly to the zip file, some tools might not handle this properly
         // otherwise
-        if let Some(parent) = relative_file_path.parent() {
-            if !parent.as_os_str().is_empty() && !added_dirs.contains(&parent) {
-                zip.add_directory(parent.to_slash_lossy(), options)?;
-                debug!(folder:? = parent; "added parent directory in zip archive");
-                added_dirs.push(parent);
-            }
+        if let Some(parent) = relative_file_path.parent() &&
+            !parent.as_os_str().is_empty() &&
+            !added_dirs.contains(&parent)
+        {
+            zip.add_directory(parent.to_slash_lossy(), options)?;
+            debug!(folder:? = parent; "added parent directory in zip archive");
+            added_dirs.push(parent);
         }
 
         let mut f = fs::File::open(file_path.clone())
@@ -211,7 +212,7 @@ async fn push_to_repo(
     let token = get_token()?;
     let client = Client::new();
 
-    let url = api_url("revision/upload", &[]);
+    let url = api_url("v1", "revision/upload", &[]);
 
     let mut headers: HeaderMap = HeaderMap::new();
 

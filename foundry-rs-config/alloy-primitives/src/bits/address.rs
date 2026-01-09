@@ -1,4 +1,4 @@
-use crate::{aliases::U160, utils::keccak256, FixedBytes};
+use crate::{FixedBytes, aliases::U160, utils::keccak256};
 use alloc::{
     borrow::Borrow,
     string::{String, ToString},
@@ -47,7 +47,7 @@ wrap_fixed_bytes!(
     extra_derives: [],
     /// An Ethereum address, 20 bytes in length.
     ///
-    /// This type is separate from [`B160`](crate::B160) / [`FixedBytes<20>`]
+    /// This type is separate from [`FixedBytes<20>`]
     /// and is declared with the [`wrap_fixed_bytes!`] macro. This allows us
     /// to implement address-specific functionality.
     ///
@@ -83,6 +83,8 @@ wrap_fixed_bytes!(
     /// // Format the address without the checksum
     /// assert_eq!(format!("{address:?}"), "0xd8da6bf26964af9d7eed9e03e53415d37aa96045");
     /// ```
+    #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+    #[cfg_attr(feature = "rkyv", rkyv(derive(Copy, Clone, Hash, PartialEq, Eq)))]
     pub struct Address<20>;
 );
 
@@ -96,7 +98,7 @@ impl From<U160> for Address {
 impl From<Address> for U160 {
     #[inline]
     fn from(value: Address) -> Self {
-        Self::from_be_bytes(value.0 .0)
+        Self::from_be_bytes(value.0.0)
     }
 }
 
@@ -348,7 +350,7 @@ impl Address {
     #[inline]
     #[must_use]
     pub fn create(&self, nonce: u64) -> Self {
-        use alloy_rlp::{Encodable, EMPTY_LIST_CODE, EMPTY_STRING_CODE};
+        use alloy_rlp::{EMPTY_LIST_CODE, EMPTY_STRING_CODE, Encodable};
 
         // max u64 encoded length is `1 + u64::BYTES`
         const MAX_LEN: usize = 1 + (1 + 20) + 9;
@@ -449,6 +451,47 @@ impl Address {
         Self::from_word(hash)
     }
 
+    /// Computes the address created by the `EOFCREATE` opcode, where `self` is the sender.
+    ///
+    /// The address is calculated as `keccak256(0xff || sender32 || salt)[12:]`, where sender32 is
+    /// the sender address left-padded to 32 bytes with zeros.
+    ///
+    /// See [EIP-7620](https://eips.ethereum.org/EIPS/eip-7620) for more details.
+    ///
+    /// <div class="warning">
+    /// This function's stability is not guaranteed. It may change in the future as the EIP is
+    /// not yet accepted.
+    /// </div>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use alloy_primitives::{address, b256, Address};
+    /// let address = address!("0xb20a608c624Ca5003905aA834De7156C68b2E1d0");
+    /// let salt = b256!("0x7c5ea36004851c764c44143b1dcb59679b11c9a68e5f41497f6cf3d480715331");
+    /// // Create an address using CREATE_EOF
+    /// let eof_address = address.create_eof(salt);
+    /// ```
+    #[must_use]
+    #[doc(alias = "eof_create")]
+    pub fn create_eof<S>(&self, salt: S) -> Self
+    where
+        // not `AsRef` because `[u8; N]` does not implement `AsRef<[u8; N]>`
+        S: Borrow<[u8; 32]>,
+    {
+        self._create_eof(salt.borrow())
+    }
+
+    // non-generic inner function
+    fn _create_eof(&self, salt: &[u8; 32]) -> Self {
+        let mut buffer = [0; 65];
+        buffer[0] = 0xff;
+        // 1..13 is zero pad (already initialized to 0)
+        buffer[13..33].copy_from_slice(self.as_slice());
+        buffer[33..].copy_from_slice(salt);
+        Self::from_word(keccak256(buffer))
+    }
+
     /// Instantiate by hashing public key bytes.
     ///
     /// # Panics
@@ -531,7 +574,7 @@ impl AddressChecksumBuffer {
 
     /// Returns the checksum of a formatted address.
     #[inline]
-    pub fn as_mut_str(&mut self) -> &mut str {
+    pub const fn as_mut_str(&mut self) -> &mut str {
         unsafe { str::from_utf8_unchecked_mut(self.0.assume_init_mut()) }
     }
 
@@ -700,43 +743,43 @@ mod tests {
                 "0000000000000000000000000000000000000000",
                 "0000000000000000000000000000000000000000000000000000000000000000",
                 "00",
-                "4D1A2e2bB4F88F0250f26Ffff098B0b30B26BF38",
+                "0x4D1A2e2bB4F88F0250f26Ffff098B0b30B26BF38",
             ),
             (
                 "deadbeef00000000000000000000000000000000",
                 "0000000000000000000000000000000000000000000000000000000000000000",
                 "00",
-                "B928f69Bb1D91Cd65274e3c79d8986362984fDA3",
+                "0xB928f69Bb1D91Cd65274e3c79d8986362984fDA3",
             ),
             (
                 "deadbeef00000000000000000000000000000000",
                 "000000000000000000000000feed000000000000000000000000000000000000",
                 "00",
-                "D04116cDd17beBE565EB2422F2497E06cC1C9833",
+                "0xD04116cDd17beBE565EB2422F2497E06cC1C9833",
             ),
             (
                 "0000000000000000000000000000000000000000",
                 "0000000000000000000000000000000000000000000000000000000000000000",
                 "deadbeef",
-                "70f2b2914A2a4b783FaEFb75f459A580616Fcb5e",
+                "0x70f2b2914A2a4b783FaEFb75f459A580616Fcb5e",
             ),
             (
                 "00000000000000000000000000000000deadbeef",
                 "00000000000000000000000000000000000000000000000000000000cafebabe",
                 "deadbeef",
-                "60f3f640a8508fC6a86d45DF051962668E1e8AC7",
+                "0x60f3f640a8508fC6a86d45DF051962668E1e8AC7",
             ),
             (
                 "00000000000000000000000000000000deadbeef",
                 "00000000000000000000000000000000000000000000000000000000cafebabe",
                 "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-                "1d8bfDC5D46DC4f61D6b6115972536eBE6A8854C",
+                "0x1d8bfDC5D46DC4f61D6b6115972536eBE6A8854C",
             ),
             (
                 "0000000000000000000000000000000000000000",
                 "0000000000000000000000000000000000000000000000000000000000000000",
                 "",
-                "E33C0C7F7df4809055C3ebA6c09CFe4BaF1BD9e0",
+                "0xE33C0C7F7df4809055C3ebA6c09CFe4BaF1BD9e0",
             ),
         ];
         for (from, salt, init_code, expected) in tests {
@@ -752,6 +795,39 @@ mod tests {
 
             assert_eq!(expected, from.create2(salt, init_code_hash));
             assert_eq!(expected, from.create2_from_code(salt, init_code));
+        }
+    }
+
+    #[test]
+    fn create_eof() {
+        // Test cases with (from_address, salt, expected_result)
+        let tests = [
+            (
+                "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "02b6826e9392ee6bf6479e413c570846ab0107ec",
+            ),
+            (
+                "0000000000000000000000000000000000000000",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "47f3f8F550f58348651C4c3E8cCD414b35d2E9fC",
+            ),
+            (
+                "deadbeef00000000000000000000000000000000",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "D146E87a5EA438103eF31cB75B432EecF0c855cc",
+            ),
+        ];
+
+        for (from, salt, expected) in tests {
+            let from = from.parse::<Address>().unwrap();
+
+            let salt = hex::decode(salt).unwrap();
+            let salt: [u8; 32] = salt.try_into().unwrap();
+
+            let expected = expected.parse::<Address>().unwrap();
+
+            assert_eq!(expected, from.create_eof(salt));
         }
     }
 

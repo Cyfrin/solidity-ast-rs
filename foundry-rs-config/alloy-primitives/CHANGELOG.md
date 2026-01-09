@@ -5,6 +5,230 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2](https://github.com/alloy-rs/core/releases/tag/v1.5.2) - 2025-12-22
+
+### Performance
+
+- [primitives] Always use FxHash for Fb* ([#1054](https://github.com/alloy-rs/core/issues/1054))
+
+## [1.5.1](https://github.com/alloy-rs/core/releases/tag/v1.5.1) - 2025-12-18
+
+### Features
+
+- Extract cache to a separate crate ([#1053](https://github.com/alloy-rs/core/issues/1053))
+- [primitives] Add U256Map ([#1052](https://github.com/alloy-rs/core/issues/1052))
+
+### Miscellaneous Tasks
+
+- Release 1.5.1
+
+## [1.5.0](https://github.com/alloy-rs/core/releases/tag/v1.5.0) - 2025-12-16
+
+### Bug Fixes
+
+- [primitives] Cache keccaks up to 88 bytes ([#1049](https://github.com/alloy-rs/core/issues/1049))
+
+### Documentation
+
+- Document allow(unexpected_cfgs) for wrap_fixed_bytes ([#1043](https://github.com/alloy-rs/core/issues/1043))
+
+### Features
+
+- Add rapidhash to available hashers ([#1051](https://github.com/alloy-rs/core/issues/1051))
+- Add keccak256_uncached ([#1050](https://github.com/alloy-rs/core/issues/1050))
+- [primitives] Add UintTryTo trait for Signed type ([#1029](https://github.com/alloy-rs/core/issues/1029))
+- [primitives] Add keccak256_cached ([#1046](https://github.com/alloy-rs/core/issues/1046))
+- [primitives] Add `Signature::as_rsy` method ([#1041](https://github.com/alloy-rs/core/issues/1041))
+- Add Bloom::accrue_logs method ([#1039](https://github.com/alloy-rs/core/issues/1039))
+
+### Miscellaneous Tasks
+
+- Release 1.5.0
+- Rm all deprecations ([#1048](https://github.com/alloy-rs/core/issues/1048))
+
+### Testing
+
+- [primitives] Use correct keccak fn
+
+## [1.4.1](https://github.com/alloy-rs/core/releases/tag/v1.4.1) - 2025-10-14
+
+### Features
+
+- Add Sqlx Traits for `Bytes` Type  ([#1020](https://github.com/alloy-rs/core/issues/1020))
+- [primitives] Add Borsh support for `TxKind` ([#1022](https://github.com/alloy-rs/core/issues/1022))
+
+### Miscellaneous Tasks
+
+- Release 1.4.1
+- Fix docs, typos ([#1023](https://github.com/alloy-rs/core/issues/1023))
+- Remove feature(doc_auto_cfg) ([#1019](https://github.com/alloy-rs/core/issues/1019))
+
+## [1.4.0](https://github.com/alloy-rs/core/releases/tag/v1.4.0) - 2025-09-26
+
+### Documentation
+
+- [primitives] Inline doc for uint! macro ([#1007](https://github.com/alloy-rs/core/issues/1007))
+
+### Features
+
+- Rkyv support ([#990](https://github.com/alloy-rs/core/issues/990))
+- Add Sqlx Traits for `Signed` Type ([#1008](https://github.com/alloy-rs/core/issues/1008))
+- [primitives] Bump map deps, wrap `DefaultHashBuilder` ([#1001](https://github.com/alloy-rs/core/issues/1001))
+- [primitives] Extend implementation of diesel's ToSql to Sqlite for FixedBytes and Address ([#977](https://github.com/alloy-rs/core/issues/977))
+- [primitives] Add borsh support ([#993](https://github.com/alloy-rs/core/issues/993))
+
+### Miscellaneous Tasks
+
+- Release 1.4.0
+- Tweak postgres.rs ([#1018](https://github.com/alloy-rs/core/issues/1018))
+
+## [1.3.1](https://github.com/alloy-rs/core/releases/tag/v1.3.1) - 2025-08-17
+
+### Bug Fixes
+
+- [primitives] Re-export correct `Entry` types ([#989](https://github.com/alloy-rs/core/issues/989))
+
+### Miscellaneous Tasks
+
+- Release 1.3.1
+- Add typos ([#991](https://github.com/alloy-rs/core/issues/991))
+
+## [1.3.0](https://github.com/alloy-rs/core/releases/tag/v1.3.0) - 2025-07-22
+
+### Features
+
+- [primitives] Serialize `Signed` with a compact binary representation ([#953](https://github.com/alloy-rs/core/issues/953))
+- Add native sqlx support for Address (MySQL/Postgres/SQLite) with feature gating and tests ([#970](https://github.com/alloy-rs/core/issues/970))
+
+### Miscellaneous Tasks
+
+- Release 1.3.0
+
+## [1.2.1](https://github.com/alloy-rs/core/releases/tag/v1.2.1) - 2025-06-20
+
+### Miscellaneous Tasks
+
+- Release 1.2.1
+- Re-enable clippy::missing-const-for-fn ([#961](https://github.com/alloy-rs/core/issues/961))
+
+## [1.2.0](https://github.com/alloy-rs/core/releases/tag/v1.2.0) - 2025-06-04
+
+### Dependencies
+
+- Bump to edition 2024 ([#960](https://github.com/alloy-rs/core/issues/960))
+- Bump MSRV to 1.85 ([#959](https://github.com/alloy-rs/core/issues/959))
+
+### Miscellaneous Tasks
+
+- Release 1.2.0
+
+## [1.1.3](https://github.com/alloy-rs/core/releases/tag/v1.1.3) - 2025-06-04
+
+### Miscellaneous Tasks
+
+- Release 1.1.3
+
+## [1.1.2](https://github.com/alloy-rs/core/releases/tag/v1.1.2) - 2025-05-20
+
+### Miscellaneous Tasks
+
+- Release 1.1.2
+
+## [1.1.1](https://github.com/alloy-rs/core/releases/tag/v1.1.1) - 2025-05-19
+
+### Features
+
+- Added standalone format_units_with ([#947](https://github.com/alloy-rs/core/issues/947))
+
+### Miscellaneous Tasks
+
+- Release 1.1.1
+
+## [1.1.0](https://github.com/alloy-rs/core/releases/tag/v1.1.0) - 2025-04-30
+
+### Features
+
+- [primitives] Add BitX<&Self> for wrap_fixed_bytes ([#945](https://github.com/alloy-rs/core/issues/945))
+- [primitives] Add BitX<&Self> for FixedBytes ([#943](https://github.com/alloy-rs/core/issues/943))
+- [primitives] Add `Address::create_eof` ([#932](https://github.com/alloy-rs/core/issues/932))
+- Added format_units_with ([#936](https://github.com/alloy-rs/core/issues/936))
+- Add `KECCAK256_EMPTY` from `revm::primitives` ([#931](https://github.com/alloy-rs/core/issues/931))
+- Convert between `Signed` of different length ([#923](https://github.com/alloy-rs/core/issues/923))
+
+### Miscellaneous Tasks
+
+- Release 1.1.0
+
+## [1.0.0](https://github.com/alloy-rs/core/releases/tag/v1.0.0) - 2025-04-03
+
+### Features
+
+- [primitives] Supporting diesel @ 2.2 ([#915](https://github.com/alloy-rs/core/issues/915))
+- 1.0-rc.1
+- Bump ruint, adjust rand feature
+
+### Miscellaneous Tasks
+
+- Release 1.0.0
+- Release 1.0.0-rc.1
+- Release 0.8.25
+
+### Other
+
+- Merge branch 'main' into v1.0-rc
+
+## [0.8.23](https://github.com/alloy-rs/core/releases/tag/v0.8.23) - 2025-03-13
+
+### Dependencies
+
+- [deps] Bump getrandom to 0.3, rand to 0.9 ([#869](https://github.com/alloy-rs/core/issues/869))
+
+### Features
+
+- [primitives] Remove `From<String> for Bytes` ([#907](https://github.com/alloy-rs/core/issues/907))
+
+### Miscellaneous Tasks
+
+- Remove deprecated `Signature` ([#899](https://github.com/alloy-rs/core/issues/899))
+
+## [1.0.0](https://github.com/alloy-rs/core/releases/tag/v1.0.0) - 2025-04-03
+
+### Bug Fixes
+
+- [primitives] Remove undefined behavior in FixedBytes ([#919](https://github.com/alloy-rs/core/issues/919))
+- Do not rely on bytes dependency in `wrap_fixed_bytes!` ([#918](https://github.com/alloy-rs/core/issues/918))
+
+### Features
+
+- Add inner mut ([#921](https://github.com/alloy-rs/core/issues/921))
+
+### Miscellaneous Tasks
+
+- Add hash_ref function to sealed.rs ([#920](https://github.com/alloy-rs/core/issues/920))
+
+## [0.8.24](https://github.com/alloy-rs/core/releases/tag/v0.8.24) - 2025-03-21
+
+### Miscellaneous Tasks
+
+- Release 0.8.24
+- Restore clippy allow
+
+### Other
+
+- Make PrimitiveSignature::new a const fn ([#913](https://github.com/alloy-rs/core/issues/913))
+
+## [0.8.23](https://github.com/alloy-rs/core/releases/tag/v0.8.23) - 2025-03-13
+
+### Features
+
+- [`primitives`] Impl Display for PrimitiveSig ([#892](https://github.com/alloy-rs/core/issues/892))
+
+### Miscellaneous Tasks
+
+- Release 0.8.23
+- Clippy ([#894](https://github.com/alloy-rs/core/issues/894))
+- [primitives] Make TxKind::into_to const ([#890](https://github.com/alloy-rs/core/issues/890))
+
 ## [0.8.22](https://github.com/alloy-rs/core/releases/tag/v0.8.22) - 2025-02-27
 
 ### Documentation
@@ -18,6 +242,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Erc2098 signature representation ([#874](https://github.com/alloy-rs/core/issues/874))
 - Add TxKind::into_to ([#875](https://github.com/alloy-rs/core/issues/875))
 - [primitives] Improve rand implementations, use `thread_rng` when available ([#870](https://github.com/alloy-rs/core/issues/870))
+
+### Miscellaneous Tasks
+
+- Release 0.8.22
 
 ## [0.8.21](https://github.com/alloy-rs/core/releases/tag/v0.8.21) - 2025-02-10
 

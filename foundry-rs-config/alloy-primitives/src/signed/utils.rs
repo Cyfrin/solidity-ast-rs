@@ -4,9 +4,7 @@ use ruint::Uint;
 /// Panic if overflow on debug mode.
 #[inline]
 #[track_caller]
-pub(super) fn handle_overflow<const BITS: usize, const LIMBS: usize>(
-    (result, overflow): (Signed<BITS, LIMBS>, bool),
-) -> Signed<BITS, LIMBS> {
+pub(super) const fn handle_overflow<T: Copy>((result, overflow): (T, bool)) -> T {
     debug_assert!(!overflow, "overflow");
     result
 }
@@ -87,9 +85,5 @@ pub(super) const fn sign_bit(bits: usize) -> u64 {
         return 0;
     }
     let bits = bits % 64;
-    if bits == 0 {
-        1 << 63
-    } else {
-        1 << (bits - 1)
-    }
+    if bits == 0 { 1 << 63 } else { 1 << (bits - 1) }
 }

@@ -1,4 +1,4 @@
-use crate::ProjectPathsConfig;
+use crate::{resolver::Node, ProjectPathsConfig};
 use alloy_json_abi::JsonAbi;
 use core::fmt;
 use foundry_compilers_artifacts::{
@@ -9,11 +9,12 @@ use foundry_compilers_artifacts::{
     BytecodeObject, CompactContractRef, Contract, FileToContractsMap, Severity, SourceFile,
 };
 use foundry_compilers_core::error::Result;
+use rayon::prelude::*;
 use semver::{Version, VersionReq};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::{Debug, Display},
     hash::Hash,
     path::{Path, PathBuf},
@@ -74,7 +75,7 @@ pub trait CompilerSettings:
     type Restrictions: CompilerSettingsRestrictions;
 
     /// Executes given fn with mutable reference to configured [OutputSelection].
-    fn update_output_selection(&mut self, f: impl FnOnce(&mut OutputSelection) + Copy);
+    fn update_output_selection(&mut self, f: impl FnMut(&mut OutputSelection));
 
     /// Returns true if artifacts compiled with given `other` config are compatible with this
     /// config and if compilation can be skipped.
@@ -139,12 +140,48 @@ pub trait CompilerInput: Serialize + Send + Sync + Sized + Debug {
     fn strip_prefix(&mut self, base: &Path);
 }
 
+/// [`ParsedSource`] parser.
+pub trait SourceParser: Clone + Debug + Send + Sync {
+    type ParsedSource: ParsedSource;
+
+    /// Creates a new parser for the given config.
+    fn new(config: &ProjectPathsConfig) -> Self;
+
+    /// Reads and parses the source file at the given path.
+    fn read(&mut self, path: &Path) -> Result<Node<Self::ParsedSource>> {
+        Node::read(path)
+    }
+
+    /// Parses the sources in the given sources map.
+    fn parse_sources(
+        &mut self,
+        sources: &mut Sources,
+    ) -> Result<Vec<(PathBuf, Node<Self::ParsedSource>)>> {
+        sources
+            .0
+            .par_iter()
+            .map(|(path, source)| {
+                let data = Self::ParsedSource::parse(source.as_ref(), path)?;
+                Ok((path.clone(), Node::new(path.clone(), source.clone(), data)))
+            })
+            .collect::<Result<_>>()
+    }
+
+    fn finalize_imports(
+        &mut self,
+        _nodes: &mut Vec<Node<Self::ParsedSource>>,
+        _include_paths: &BTreeSet<PathBuf>,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// Parser of the source files which is used to identify imports and version requirements of the
 /// given source.
 ///
 /// Used by path resolver to resolve imports or determine compiler versions needed to compiler given
 /// sources.
-pub trait ParsedSource: Debug + Sized + Send + Clone {
+pub trait ParsedSource: Clone + Debug + Sized + Send {
     type Language: Language;
 
     /// Parses the content of the source file.
@@ -331,7 +368,7 @@ pub trait Compiler: Send + Sync + Clone {
     /// Output data for each contract
     type CompilerContract: CompilerContract;
     /// Source parser used for resolving imports and version requirements.
-    type ParsedSource: ParsedSource<Language = Self::Language>;
+    type Parser: SourceParser<ParsedSource: ParsedSource<Language = Self::Language>>;
     /// Compiler settings.
     type Settings: CompilerSettings;
     /// Enum of languages supported by the compiler.
@@ -356,20 +393,24 @@ pub(crate) fn cache_version(
     f: impl FnOnce(&Path) -> Result<Version>,
 ) -> Result<Version> {
     #[allow(clippy::complexity)]
-    static VERSION_CACHE: OnceLock<Mutex<HashMap<PathBuf, HashMap<Vec<String>, Version>>>> =
+    static VERSION_CACHE: OnceLock<Mutex<HashMap<(PathBuf, Vec<String>), Version>>> =
         OnceLock::new();
-    let mut lock = VERSION_CACHE
-        .get_or_init(|| Mutex::new(HashMap::new()))
+
+    let mut cache = VERSION_CACHE
+        .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    if let Some(version) = lock.get(&path).and_then(|versions| versions.get(args)) {
-        return Ok(version.clone());
+    match cache.entry((path, args.to_vec())) {
+        Entry::Occupied(entry) => Ok(entry.get().clone()),
+        Entry::Vacant(entry) => {
+            let path = &entry.key().0;
+            let _guard =
+                debug_span!("get_version", path = %path.file_name().map(|n| n.to_string_lossy()).unwrap_or_else(|| path.to_string_lossy()))
+                    .entered();
+            let version = f(path)?;
+            entry.insert(version.clone());
+            Ok(version)
+        }
     }
-
-    let version = f(&path)?;
-
-    lock.entry(path).or_default().insert(args.to_vec(), version.clone());
-
-    Ok(version)
 }

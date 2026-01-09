@@ -4,16 +4,15 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "postgres")))]
 
 use crate::{
-    utils::{rem_up, trim_end_vec},
     Uint,
+    utils::{rem_up, trim_end_vec},
 };
 use bytes::{BufMut, BytesMut};
 use core::{
     error::Error,
-    iter,
-    str::{from_utf8, FromStr},
+    str::{FromStr, from_utf8},
 };
-use postgres_types::{to_sql_checked, FromSql, IsNull, ToSql, Type, WrongType};
+use postgres_types::{FromSql, IsNull, ToSql, Type, WrongType, to_sql_checked};
 use thiserror::Error;
 
 type BoxedError = Box<dyn Error + Sync + Send + 'static>;
@@ -290,7 +289,7 @@ impl<'a, const BITS: usize, const LIMBS: usize> FromSql<'a> for Uint<BITS, LIMBS
                 });
                 #[allow(clippy::cast_sign_loss)]
                 // Expression can not be negative due to checks above
-                let iter = iter.chain(iter::repeat(0).take((exponent + 1 - digits) as usize));
+                let iter = iter.chain(std::iter::repeat_n(0, (exponent + 1 - digits) as usize));
 
                 let value = Self::from_base_be(10000, iter)?;
                 if error {
@@ -491,7 +490,7 @@ mod tests {
     // --nocapture postgres
     //
     #[test]
-    #[ignore]
+    #[ignore = "requires a live postgresql server"]
     fn test_postgres() {
         // docker run -it --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres
         let client = Client::connect("postgresql://postgres:postgres@localhost", NoTls).unwrap();
@@ -504,7 +503,7 @@ mod tests {
             // with the `PROPTEST_CASES` env variable.
             let mut config = ProptestConfig::default();
             // No point in running many values for small sizes
-            if BITS < 4 { config.cases = 16; };
+            if BITS < 4 { config.cases = 16; }
 
             proptest!(config, |(value: Uint<BITS, LIMBS>)| {
 

@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.89"
 name = "svm-rs"
-version = "0.5.11"
+version = "0.5.22"
 authors = [
     "Rohit Narurkar <rohit.narurkar@protonmail.com>",
     "Matthias Seitz <matthias.seitz@outlook.de>",
@@ -30,6 +30,7 @@ homepage = "https://github.com/alloy-rs/svm-rs"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alloy-rs/svm-rs"
+resolver = "2"
 
 [features]
 blocking = ["reqwest/blocking"]
@@ -79,7 +80,7 @@ features = ["derive"]
 optional = true
 
 [dependencies.console]
-version = "0.15"
+version = "0.16"
 optional = true
 default-features = false
 
@@ -89,22 +90,19 @@ optional = true
 default-features = false
 
 [dependencies.dirs]
-version = "5.0"
-
-[dependencies.fs4]
-version = "0.12"
+version = "6.0"
 
 [dependencies.hex]
 version = "1.10"
 package = "const-hex"
 
 [dependencies.indicatif]
-version = "0.17"
+version = "0.18"
 optional = true
 default-features = false
 
 [dependencies.itertools]
-version = "0.13"
+version = "0.14"
 optional = true
 
 [dependencies.reqwest]
@@ -147,7 +145,7 @@ optional = true
 version = "2.5"
 
 [dev-dependencies.rand]
-version = "0.8"
+version = "0.9"
 
 [dev-dependencies.serial_test]
 version = "3.0"
@@ -171,8 +169,8 @@ features = [
 ]
 optional = true
 
-[target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies.zip]
-version = "2"
+[target.'cfg(target_os = "windows")'.dependencies.zip]
+version = "4"
 features = ["deflate"]
 default-features = false
 

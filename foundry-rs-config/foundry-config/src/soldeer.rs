@@ -28,11 +28,15 @@ pub struct MapDependency {
     /// The git tag in case git is used as dependency source
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+
+    /// An optional relative path to the project's root within the repository
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
 }
 
 /// Type for Soldeer configs, under dependencies tag in the foundry.toml
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SoldeerDependencyConfig(BTreeMap<String, SoldeerDependencyValue>);
+pub struct SoldeerDependencyConfig(pub BTreeMap<String, SoldeerDependencyValue>);
 
 impl AsRef<Self> for SoldeerDependencyConfig {
     fn as_ref(&self) -> &Self {

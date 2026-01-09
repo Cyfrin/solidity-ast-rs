@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::HashMap;
 use std::collections::HashSet;
 use std::hash::BuildHasher;
@@ -160,6 +161,31 @@ pub trait FromMeta: Sized {
 impl FromMeta for () {
     fn from_word() -> Result<Self> {
         Ok(())
+    }
+
+    fn from_list(items: &[NestedMeta]) -> Result<Self> {
+        let mut errors = Error::accumulator();
+        for item in items {
+            errors.push(match item {
+                // Use `unknown_field_path` rather than `too_many_items` so that when this is used with
+                // `flatten` the resulting error message will include the valid fields rather than a confusing
+                // message about having only expected zero items.
+                //
+                // The accumulator is used to ensure all these errors are returned at once, rather than
+                // only producing an error on the first unexpected field in the flattened list.
+                NestedMeta::Meta(meta) => Error::unknown_field_path(meta.path()).with_span(meta),
+                NestedMeta::Lit(lit) => Error::unexpected_expr_type(
+                    &(syn::ExprLit {
+                        attrs: vec![],
+                        lit: lit.clone(),
+                    }
+                    .into()),
+                )
+                .with_span(lit),
+            });
+        }
+
+        errors.finish()
     }
 }
 
@@ -425,6 +451,7 @@ macro_rules! from_syn_expr_type {
 
 from_syn_expr_type!(syn::ExprArray, Array);
 from_syn_expr_type!(syn::ExprPath, Path);
+from_syn_expr_type!(syn::ExprRange, Range);
 
 /// Adapter from `syn::parse::Parse` to `FromMeta` for items that cannot
 /// be expressed in a [`syn::MetaNameValue`].
@@ -460,7 +487,6 @@ from_syn_parse!(syn::TypeMacro);
 from_syn_parse!(syn::TypeNever);
 from_syn_parse!(syn::TypeParam);
 from_syn_parse!(syn::TypeParen);
-from_syn_parse!(syn::TypePath);
 from_syn_parse!(syn::TypePtr);
 from_syn_parse!(syn::TypeReference);
 from_syn_parse!(syn::TypeSlice);
@@ -468,6 +494,39 @@ from_syn_parse!(syn::TypeTraitObject);
 from_syn_parse!(syn::TypeTuple);
 from_syn_parse!(syn::Visibility);
 from_syn_parse!(syn::WhereClause);
+
+impl FromMeta for syn::TypePath {
+    /// Supports both quote-wrapped and bare values.
+    fn from_expr(expr: &Expr) -> Result<Self> {
+        match expr {
+            Expr::Path(body) => {
+                if body.attrs.is_empty() {
+                    Ok(syn::TypePath {
+                        qself: body.qself.clone(),
+                        path: body.path.clone(),
+                    })
+                } else {
+                    Err(Error::custom("attributes are not allowed").with_span(body))
+                }
+            }
+            Expr::Lit(expr_lit) => Self::from_value(&expr_lit.lit),
+            Expr::Group(group) => Self::from_expr(&group.expr),
+            _ => Err(Error::unexpected_expr_type(expr)),
+        }
+    }
+
+    fn from_string(value: &str) -> Result<Self> {
+        syn::parse_str(value).map_err(|_| Error::unknown_value(value))
+    }
+
+    fn from_value(value: &Lit) -> Result<Self> {
+        if let Lit::Str(ref v) = *value {
+            v.parse().map_err(|_| Error::unknown_lit_str_value(v))
+        } else {
+            Err(Error::unexpected_lit_type(value))
+        }
+    }
+}
 
 macro_rules! from_numeric_array {
     ($ty:ident) => {
@@ -706,89 +765,106 @@ impl KeyFromPath for syn::Ident {
     }
 }
 
-macro_rules! hash_map {
-    ($key:ty) => {
+macro_rules! map {
+    (hash_map, $key:ty, $nested:ident) => {
         impl<V: FromMeta, S: BuildHasher + Default> FromMeta for HashMap<$key, V, S> {
-            fn from_list(nested: &[NestedMeta]) -> Result<Self> {
-                // Convert the nested meta items into a sequence of (path, value result) result tuples.
-                // An outer Err means no (key, value) structured could be found, while an Err in the
-                // second position of the tuple means that value was rejected by FromMeta.
-                //
-                // We defer key conversion into $key so that we don't lose span information in the case
-                // of String keys; we'll need it for good duplicate key errors later.
-                let pairs = nested
-                    .iter()
-                    .map(|item| -> Result<(&syn::Path, Result<V>)> {
-                        match *item {
-                            NestedMeta::Meta(ref inner) => {
-                                let path = inner.path();
-                                Ok((
-                                    path,
-                                    FromMeta::from_meta(inner).map_err(|e| e.at_path(&path)),
-                                ))
-                            }
-                            NestedMeta::Lit(_) => Err(Error::unsupported_format("expression")),
+            map!(
+                HashMap::with_capacity_and_hasher($nested.len(), Default::default()),
+                $key,
+                $nested
+            );
+        }
+    };
+
+    (btree_map, $key:ty, $nested:ident) => {
+        impl<V: FromMeta> FromMeta for BTreeMap<$key, V> {
+            map!(BTreeMap::new(), $key, $nested);
+        }
+    };
+
+    ($new:expr, $key:ty, $nested:ident) => {
+        fn from_list($nested: &[NestedMeta]) -> Result<Self> {
+            // Convert the nested meta items into a sequence of (path, value result) result tuples.
+            // An outer Err means no (key, value) structured could be found, while an Err in the
+            // second position of the tuple means that value was rejected by FromMeta.
+            //
+            // We defer key conversion into $key so that we don't lose span information in the case
+            // of String keys; we'll need it for good duplicate key errors later.
+            let pairs = $nested
+                .iter()
+                .map(|item| -> Result<(&syn::Path, Result<V>)> {
+                    match *item {
+                        NestedMeta::Meta(ref inner) => {
+                            let path = inner.path();
+                            Ok((
+                                path,
+                                FromMeta::from_meta(inner).map_err(|e| e.at_path(&path)),
+                            ))
                         }
-                    });
-
-                let mut errors = Error::accumulator();
-                // We need to track seen keys separately from the final map, since a seen key with an
-                // Err value won't go into the final map but should trigger a duplicate field error.
-                //
-                // This is a set of $key rather than Path to avoid the possibility that a key type
-                // parses two paths of different values to the same key value.
-                let mut seen_keys = HashSet::with_capacity(nested.len());
-
-                // The map to return in the Ok case. Its size will always be exactly nested.len(),
-                // since otherwise ≥1 field had a problem and the entire map is dropped immediately
-                // when the function returns `Err`.
-                let mut map = HashMap::with_capacity_and_hasher(nested.len(), Default::default());
-
-                for item in pairs {
-                    if let Some((path, value)) = errors.handle(item) {
-                        let key: $key = match KeyFromPath::from_path(path) {
-                            Ok(k) => k,
-                            Err(e) => {
-                                errors.push(e);
-
-                                // Surface value errors even under invalid keys
-                                errors.handle(value);
-
-                                continue;
-                            }
-                        };
-
-                        let already_seen = seen_keys.contains(&key);
-
-                        if already_seen {
-                            errors.push(Error::duplicate_field(&key.to_display()).with_span(path));
-                        }
-
-                        match value {
-                            Ok(_) if already_seen => {}
-                            Ok(val) => {
-                                map.insert(key.clone(), val);
-                            }
-                            Err(e) => {
-                                errors.push(e);
-                            }
-                        }
-
-                        seen_keys.insert(key);
+                        NestedMeta::Lit(_) => Err(Error::unsupported_format("expression")),
                     }
-                }
+                });
 
-                errors.finish_with(map)
+            let mut errors = Error::accumulator();
+            // We need to track seen keys separately from the final map, since a seen key with an
+            // Err value won't go into the final map but should trigger a duplicate field error.
+            //
+            // This is a set of $key rather than Path to avoid the possibility that a key type
+            // parses two paths of different values to the same key value.
+            let mut seen_keys = HashSet::with_capacity($nested.len());
+
+            // The map to return in the Ok case. Its size will always be exactly nested.len(),
+            // since otherwise ≥1 field had a problem and the entire map is dropped immediately
+            // when the function returns `Err`.
+            let mut map = $new;
+
+            for item in pairs {
+                if let Some((path, value)) = errors.handle(item) {
+                    let key: $key = match KeyFromPath::from_path(path) {
+                        Ok(k) => k,
+                        Err(e) => {
+                            errors.push(e);
+
+                            // Surface value errors even under invalid keys
+                            errors.handle(value);
+
+                            continue;
+                        }
+                    };
+
+                    let already_seen = seen_keys.contains(&key);
+
+                    if already_seen {
+                        errors.push(Error::duplicate_field(&key.to_display()).with_span(path));
+                    }
+
+                    match value {
+                        Ok(_) if already_seen => {}
+                        Ok(val) => {
+                            map.insert(key.clone(), val);
+                        }
+                        Err(e) => {
+                            errors.push(e);
+                        }
+                    }
+
+                    seen_keys.insert(key);
+                }
             }
+
+            errors.finish_with(map)
         }
     };
 }
 
 // This is done as a macro rather than a blanket impl to avoid breaking backwards compatibility
 // with 0.12.x, while still sharing the same impl.
-hash_map!(String);
-hash_map!(syn::Ident);
-hash_map!(syn::Path);
+map!(hash_map, String, nested);
+map!(hash_map, syn::Ident, nested);
+map!(hash_map, syn::Path, nested);
+
+map!(btree_map, String, nested);
+map!(btree_map, syn::Ident, nested);
 
 /// Tests for `FromMeta` implementations. Wherever the word `ignore` appears in test input,
 /// it should not be considered by the parsing.
@@ -817,6 +893,13 @@ mod tests {
     #[test]
     fn unit_succeeds() {
         fm::<()>(quote!(ignore));
+        fm::<()>(quote!(ignore()));
+    }
+
+    #[test]
+    #[should_panic(expected = "UnknownField")]
+    fn unit_fails() {
+        fm::<()>(quote!(ignore(foo = "bar")));
     }
 
     #[test]
@@ -868,7 +951,7 @@ mod tests {
         assert_eq!(fm::<f64>(quote!(ignore = "1.4e10")), 1.4e10);
     }
 
-    #[should_panic(expected = "UnknownValue(\"0\")")]
+    #[should_panic(expected = "UnknownValue")]
     #[test]
     fn nonzero_number_fails() {
         fm::<NonZeroU64>(quote!(ignore = "0"));
@@ -1016,6 +1099,102 @@ mod tests {
         );
     }
 
+    #[test]
+    fn btree_map_succeeds() {
+        use std::collections::BTreeMap;
+
+        let comparison = {
+            let mut c = BTreeMap::new();
+            c.insert("hello".to_string(), true);
+            c.insert("world".to_string(), false);
+            c.insert("there".to_string(), true);
+            c
+        };
+
+        assert_eq!(
+            fm::<BTreeMap<String, bool>>(quote!(ignore(hello, world = false, there = "true"))),
+            comparison
+        );
+    }
+
+    /// Check that a `HashMap` cannot have duplicate keys, and that the generated error
+    /// is assigned a span to correctly target the diagnostic message.
+    #[test]
+    fn btree_map_duplicate() {
+        use std::collections::BTreeMap;
+
+        let err: Result<BTreeMap<String, bool>> =
+            FromMeta::from_meta(&pm(quote!(ignore(hello, hello = false))).unwrap());
+
+        let err = err.expect_err("Duplicate keys in BTreeMap should error");
+
+        assert!(err.has_span());
+        assert_eq!(err.to_string(), Error::duplicate_field("hello").to_string());
+    }
+
+    #[test]
+    fn btree_map_multiple_errors() {
+        use std::collections::BTreeMap;
+
+        let err = BTreeMap::<String, bool>::from_meta(
+            &pm(quote!(ignore(hello, hello = 3, hello = false))).unwrap(),
+        )
+        .expect_err("Duplicates and bad values should error");
+
+        assert_eq!(err.len(), 3);
+        let errors = err.into_iter().collect::<Vec<_>>();
+        assert!(errors[0].has_span());
+        assert!(errors[1].has_span());
+        assert!(errors[2].has_span());
+    }
+
+    #[test]
+    fn btree_map_ident_succeeds() {
+        use std::collections::BTreeMap;
+        use syn::parse_quote;
+
+        let comparison = {
+            let mut c = BTreeMap::<syn::Ident, bool>::new();
+            c.insert(parse_quote!(first), true);
+            c.insert(parse_quote!(second), false);
+            c
+        };
+
+        assert_eq!(
+            fm::<BTreeMap<syn::Ident, bool>>(quote!(ignore(first, second = false))),
+            comparison
+        );
+    }
+
+    #[test]
+    fn btree_map_ident_rejects_non_idents() {
+        use std::collections::BTreeMap;
+
+        let err: Result<BTreeMap<syn::Ident, bool>> =
+            FromMeta::from_meta(&pm(quote!(ignore(first, the::second))).unwrap());
+
+        err.unwrap_err();
+    }
+
+    #[test]
+    fn btree_map_expr_values_succeed() {
+        use std::collections::BTreeMap;
+        use syn::parse_quote;
+
+        let comparison: BTreeMap<String, syn::Expr> = vec![
+            ("hello", parse_quote!(2 + 2)),
+            ("world", parse_quote!(x.foo())),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+
+        assert_eq!(
+            fm::<BTreeMap<String, syn::Expr>>(quote!(ignore(hello = 2 + 2, world = x.foo()))),
+            comparison
+        );
+    }
+
     /// Tests that fallible parsing will always produce an outer `Ok` (from `fm`),
     /// and will accurately preserve the inner contents.
     #[test]
@@ -1109,5 +1288,13 @@ mod tests {
         fm::<Vec<syn::LitStr>>(quote!(ignore = "[]"));
         fm::<Vec<syn::LitStr>>(quote!(ignore = []));
         fm::<Vec<syn::LitBool>>(quote!(ignore = [true, false]));
+    }
+
+    #[test]
+    fn expr_range_without_quotes() {
+        fm::<syn::ExprRange>(quote!(ignore = 0..5));
+        fm::<syn::ExprRange>(quote!(ignore = 0..=5));
+        fm::<syn::ExprRange>(quote!(ignore = ..5));
+        fm::<syn::ExprRange>(quote!(ignore = ..(x + y)));
     }
 }

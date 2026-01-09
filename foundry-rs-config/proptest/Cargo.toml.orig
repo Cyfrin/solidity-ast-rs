@@ -1,0 +1,127 @@
+[package]
+name = "proptest"
+version = "1.6.0"
+authors = ["Jason Lingle"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/proptest-rs/proptest"
+homepage = "https://proptest-rs.github.io/proptest/proptest/index.html"
+documentation = "https://docs.rs/proptest/latest/proptest/"
+keywords = ["property", "testing", "quickcheck", "fuzz", "hypothesis"]
+categories = ["development-tools::testing"]
+edition = "2018"
+rust-version = "1.65"
+exclude = ["/gen-*.sh", "/readme-*.md"]
+
+description = """
+Hypothesis-like property-based testing and shrinking.
+"""
+
+[features]
+
+default = ["std", "fork", "timeout", "bit-set"]
+# Everything in `default` that doesn't break code coverage builds
+default-code-coverage = ["std", "fork", "timeout", "bit-set"]
+
+attr-macro = ["proptest-macro"]
+
+# Enables unstable features of Rust.
+unstable = []
+
+# Enables the use of standard-library dependent features
+std = ["rand/std", "lazy_static", "regex-syntax", "num-traits/std"]
+
+# std or libm required for mul_add.
+no_std = ["num-traits/libm"]
+
+# For use in no_std environments with access to an allocator
+#alloc = ["hashmap_core"]
+alloc = []
+
+# Use a hardware random number generator (instead of static seed) for x86 no_std targets
+hardware-rng = ["x86"]
+
+# Enables use of the "fork" feature.
+#
+# Requires std.
+fork = ["std", "rusty-fork", "tempfile"]
+
+# Enables use of the "timeout" feature.
+#
+# Requires the "fork" feature.
+timeout = ["fork", "rusty-fork/timeout"]
+
+# Enables support for 64-bit atomic integers.
+# This is enabled by default. Some no_std environments do not support it and
+# need it excluded, however.
+atomic64bit = []
+
+bit-set = ["dep:bit-set", "dep:bit-vec"]
+
+# Enables proper handling of panics
+# In particular, hides all intermediate panics flowing into stderr during shrink phase
+handle-panics = ["std"]
+
+[dependencies]
+bitflags = "2"
+unarray = "0.1.4"
+proptest-macro = { version = "0.1", optional = true }
+
+# [dependencies.hashmap_core]
+# version = "0.1.5"
+# optional = true
+
+[dependencies.lazy_static]
+version = "1.2"
+optional = true
+
+[dependencies.num-traits]
+version = "0.2.15"
+default-features = false
+
+[dependencies.regex-syntax]
+# If you change this, make sure to also bump the `regex` dependency to a
+# version that also uses this version of regex-syntax.
+version = "0.8"
+optional = true
+
+[dependencies.bit-set]
+version = "0.8.0"
+optional = true
+
+[dependencies.bit-vec]
+version = "0.8.0"
+optional = true
+
+[dependencies.rand]
+version = "0.8"
+default-features = false
+features = ["alloc"]
+
+[dependencies.rand_xorshift]
+version = "0.3"
+
+[dependencies.rand_chacha]
+version = "0.3"
+default-features = false
+
+[dependencies.rusty-fork]
+version = "0.3.0"
+optional = true
+default-features = false
+
+[dependencies.tempfile]
+version = "3.0"
+optional = true
+
+[dependencies.x86]
+version = "0.52.0"
+optional = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dev-dependencies]
+regex = "1.0"
+trybuild = "=1.0.0"

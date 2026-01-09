@@ -10,9 +10,11 @@ use super::{
 };
 use crate::{
     artifacts::vyper::{VyperCompilationError, VyperSettings},
-    resolver::parse::SolData,
+    parser::VyperParser,
+    resolver::parse::{SolData, SolParser},
     settings::VyperRestrictions,
     solc::SolcRestrictions,
+    SourceParser,
 };
 use foundry_compilers_artifacts::{
     error::SourceLocation,
@@ -66,6 +68,22 @@ pub enum MultiCompilerLanguage {
     Vyper(VyperLanguage),
 }
 
+impl Default for MultiCompilerLanguage {
+    fn default() -> Self {
+        Self::Solc(SolcLanguage::Solidity)
+    }
+}
+
+impl MultiCompilerLanguage {
+    pub fn is_vyper(&self) -> bool {
+        matches!(self, Self::Vyper(_))
+    }
+
+    pub fn is_solc(&self) -> bool {
+        matches!(self, Self::Solc(_))
+    }
+}
+
 impl From<SolcLanguage> for MultiCompilerLanguage {
     fn from(language: SolcLanguage) -> Self {
         Self::Solc(language)
@@ -91,11 +109,52 @@ impl fmt::Display for MultiCompilerLanguage {
     }
 }
 
+/// Source parser for the [`MultiCompiler`]. Recognizes Solc and Vyper sources.
+#[derive(Clone, Debug)]
+pub struct MultiCompilerParser {
+    solc: SolParser,
+    vyper: VyperParser,
+}
+
+impl MultiCompilerParser {
+    /// Returns the parser used to parse Solc sources.
+    pub fn solc(&self) -> &SolParser {
+        &self.solc
+    }
+
+    /// Returns the parser used to parse Solc sources.
+    pub fn solc_mut(&mut self) -> &mut SolParser {
+        &mut self.solc
+    }
+
+    /// Returns the parser used to parse Vyper sources.
+    pub fn vyper(&self) -> &VyperParser {
+        &self.vyper
+    }
+
+    /// Returns the parser used to parse Vyper sources.
+    pub fn vyper_mut(&mut self) -> &mut VyperParser {
+        &mut self.vyper
+    }
+}
+
 /// Source parser for the [MultiCompiler]. Recognizes Solc and Vyper sources.
 #[derive(Clone, Debug)]
 pub enum MultiCompilerParsedSource {
     Solc(SolData),
     Vyper(VyperParsedSource),
+}
+
+impl From<SolData> for MultiCompilerParsedSource {
+    fn from(data: SolData) -> Self {
+        Self::Solc(data)
+    }
+}
+
+impl From<VyperParsedSource> for MultiCompilerParsedSource {
+    fn from(data: VyperParsedSource) -> Self {
+        Self::Vyper(data)
+    }
 }
 
 impl MultiCompilerParsedSource {
@@ -157,8 +216,8 @@ impl CompilerSettings for MultiCompilerSettings {
         self.solc.can_use_cached(&other.solc) && self.vyper.can_use_cached(&other.vyper)
     }
 
-    fn update_output_selection(&mut self, f: impl FnOnce(&mut OutputSelection) + Copy) {
-        self.solc.update_output_selection(f);
+    fn update_output_selection(&mut self, mut f: impl FnMut(&mut OutputSelection)) {
+        self.solc.update_output_selection(&mut f);
         self.vyper.update_output_selection(f);
     }
 
@@ -277,7 +336,7 @@ impl CompilerInput for MultiCompilerInput {
 impl Compiler for MultiCompiler {
     type Input = MultiCompilerInput;
     type CompilationError = MultiCompilerError;
-    type ParsedSource = MultiCompilerParsedSource;
+    type Parser = MultiCompilerParser;
     type Settings = MultiCompilerSettings;
     type Language = MultiCompilerLanguage;
     type CompilerContract = Contract;
@@ -317,20 +376,116 @@ impl Compiler for MultiCompiler {
     }
 }
 
+impl SourceParser for MultiCompilerParser {
+    type ParsedSource = MultiCompilerParsedSource;
+
+    fn new(config: &crate::ProjectPathsConfig) -> Self {
+        Self { solc: SolParser::new(config), vyper: VyperParser::new(config) }
+    }
+
+    fn read(&mut self, path: &Path) -> Result<crate::resolver::Node<Self::ParsedSource>> {
+        Ok(match guess_lang(path)? {
+            MultiCompilerLanguage::Solc(_) => {
+                self.solc.read(path)?.map_data(MultiCompilerParsedSource::Solc)
+            }
+            MultiCompilerLanguage::Vyper(_) => {
+                self.vyper.read(path)?.map_data(MultiCompilerParsedSource::Vyper)
+            }
+        })
+    }
+
+    fn parse_sources(
+        &mut self,
+        sources: &mut Sources,
+    ) -> Result<Vec<(PathBuf, crate::resolver::Node<Self::ParsedSource>)>> {
+        let mut vyper = Sources::new();
+        sources.retain(|path, source| {
+            if let Ok(lang) = guess_lang(path) {
+                match lang {
+                    MultiCompilerLanguage::Solc(_) => {}
+                    MultiCompilerLanguage::Vyper(_) => {
+                        vyper.insert(path.clone(), source.clone());
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+
+        let solc_nodes = self.solc.parse_sources(sources)?;
+        let vyper_nodes = self.vyper.parse_sources(&mut vyper)?;
+        Ok(solc_nodes
+            .into_iter()
+            .map(|(k, v)| (k, v.map_data(MultiCompilerParsedSource::Solc)))
+            .chain(
+                vyper_nodes
+                    .into_iter()
+                    .map(|(k, v)| (k, v.map_data(MultiCompilerParsedSource::Vyper))),
+            )
+            .collect())
+    }
+
+    fn finalize_imports(
+        &mut self,
+        all_nodes: &mut Vec<crate::resolver::Node<Self::ParsedSource>>,
+        include_paths: &BTreeSet<PathBuf>,
+    ) -> Result<()> {
+        // Must maintain original order.
+        let mut solc_nodes = Vec::new();
+        let mut vyper_nodes = Vec::new();
+        let mut order = Vec::new();
+        for node in std::mem::take(all_nodes) {
+            order.push(node.data.language());
+            match node.data {
+                MultiCompilerParsedSource::Solc(_) => {
+                    solc_nodes.push(node.map_data(|data| match data {
+                        MultiCompilerParsedSource::Solc(data) => data,
+                        _ => unreachable!(),
+                    }));
+                }
+                MultiCompilerParsedSource::Vyper(_) => {
+                    vyper_nodes.push(node.map_data(|data| match data {
+                        MultiCompilerParsedSource::Vyper(data) => data,
+                        _ => unreachable!(),
+                    }));
+                }
+            }
+        }
+
+        self.solc.finalize_imports(&mut solc_nodes, include_paths)?;
+        self.vyper.finalize_imports(&mut vyper_nodes, include_paths)?;
+
+        // Assume that the order was not changed by the parsers.
+        let mut solc_nodes = solc_nodes.into_iter();
+        let mut vyper_nodes = vyper_nodes.into_iter();
+        for lang in order {
+            match lang {
+                MultiCompilerLanguage::Solc(_) => {
+                    all_nodes.push(solc_nodes.next().unwrap().map_data(Into::into));
+                }
+                MultiCompilerLanguage::Vyper(_) => {
+                    all_nodes.push(vyper_nodes.next().unwrap().map_data(Into::into));
+                }
+            }
+        }
+        assert!(solc_nodes.next().is_none());
+        assert!(vyper_nodes.next().is_none());
+
+        Ok(())
+    }
+}
+
 impl ParsedSource for MultiCompilerParsedSource {
     type Language = MultiCompilerLanguage;
 
-    fn parse(content: &str, file: &std::path::Path) -> Result<Self> {
-        let Some(extension) = file.extension().and_then(|e| e.to_str()) else {
-            return Err(SolcError::msg("failed to resolve file extension"));
-        };
-
-        if SOLC_EXTENSIONS.contains(&extension) {
-            <SolData as ParsedSource>::parse(content, file).map(Self::Solc)
-        } else if VYPER_EXTENSIONS.contains(&extension) {
-            VyperParsedSource::parse(content, file).map(Self::Vyper)
-        } else {
-            Err(SolcError::msg("unexpected file extension"))
+    fn parse(content: &str, file: &Path) -> Result<Self> {
+        match guess_lang(file)? {
+            MultiCompilerLanguage::Solc(_) => {
+                <SolData as ParsedSource>::parse(content, file).map(Self::Solc)
+            }
+            MultiCompilerLanguage::Vyper(_) => {
+                VyperParsedSource::parse(content, file).map(Self::Vyper)
+            }
         }
     }
 
@@ -386,6 +541,24 @@ impl ParsedSource for MultiCompilerParsedSource {
                 .collect::<Vec<_>>(),
         }
         .into_iter()
+    }
+}
+
+fn guess_lang(path: &Path) -> Result<MultiCompilerLanguage> {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .ok_or_else(|| SolcError::msg("failed to resolve file extension"))?;
+    if SOLC_EXTENSIONS.contains(&extension) {
+        Ok(MultiCompilerLanguage::Solc(match extension {
+            "sol" => SolcLanguage::Solidity,
+            "yul" => SolcLanguage::Yul,
+            _ => unreachable!(),
+        }))
+    } else if VYPER_EXTENSIONS.contains(&extension) {
+        Ok(MultiCompilerLanguage::Vyper(VyperLanguage::default()))
+    } else {
+        Err(SolcError::msg("unexpected file extension"))
     }
 }
 
