@@ -212,6 +212,7 @@ impl ProjectConfigInputBuilder {
             skip: config.skip,
             solc_compiler,
             evm_version: config.evm_version,
+            via_ir: config.via_ir,
         })
     }
 }

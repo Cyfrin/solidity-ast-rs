@@ -12,6 +12,8 @@ pub struct DerivedAstEvmInfo {
     pub versioned_asts: Vec<VersionedAstOutputs>,
     /// EVM version derived from configuration file
     pub evm_version: EvmVersion,
+    /// Whether via_ir is set to to true in foundry.toml
+    pub via_ir: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]

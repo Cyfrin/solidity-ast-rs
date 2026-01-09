@@ -32,6 +32,9 @@ pub struct ProjectConfigInput {
 
     /// Evm Version
     pub evm_version: EvmVersion,
+
+    /// Whether via_ir is set to true in foundry.toml for the profile
+    pub via_ir: bool,
 }
 
 #[derive(Debug)]

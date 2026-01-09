@@ -32,5 +32,6 @@ pub use project_config::*;
 pub fn derive_ast_and_evm_info(config: &ProjectConfigInput) -> Result<DerivedAstEvmInfo> {
     let asts = config.make_asts()?;
     let evm_version = config.evm_version;
-    Ok(DerivedAstEvmInfo { versioned_asts: asts, evm_version })
+    let via_ir = config.via_ir;
+    Ok(DerivedAstEvmInfo { versioned_asts: asts, evm_version, via_ir })
 }
