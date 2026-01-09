@@ -12,7 +12,7 @@ mod common {
     use foundry_compilers::{
         Graph, ProjectBuilder,
         artifacts::{Settings, SolcInput, Sources, output_selection::OutputSelection},
-        resolver::parse::SolData,
+        resolver::parse::SolParser,
         solc::{Solc, SolcCompiler, SolcLanguage},
     };
     use semver::Version;
@@ -33,7 +33,7 @@ mod common {
         let raw_config = common::get_raw_config(root).sanitized();
         let project_paths = raw_config.project_paths();
 
-        let graph = Graph::<SolData>::resolve_sources(
+        let graph = Graph::<SolParser>::resolve_sources(
             &project_paths,
             project_paths.read_sources().unwrap(),
         )

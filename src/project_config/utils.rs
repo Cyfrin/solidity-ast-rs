@@ -1,13 +1,14 @@
 use super::{ProjectConfigInput, SolcCompilerConfigInput, VersionedAstOutputs};
-use crate::{project_config::command::compile_output, Result, SolcCompilerOutput};
+use crate::{Result, SolcCompilerOutput, project_config::command::compile_output};
 use foundry_compilers::{
+    Graph, ProjectBuilder,
     artifacts::{
-        output_selection::OutputSelection, Settings, SolcInput, Source, Sources,
-        StandardJsonCompilerInput,
+        Settings, SolcInput, Source, Sources, StandardJsonCompilerInput,
+        output_selection::OutputSelection,
     },
-    resolver::parse::SolData,
+    resolver::parse::SolParser,
     solc::{Solc, SolcCompiler, SolcLanguage},
-    utils, Graph, ProjectBuilder,
+    utils,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use semver::Version;
@@ -41,7 +42,7 @@ impl ProjectConfigInput {
                     .build(Default::default())?;
 
                 let solidity_sources = {
-                    let graph = Graph::<SolData>::resolve_sources(&self.project_paths, sources)?;
+                    let graph = Graph::<SolParser>::resolve_sources(&self.project_paths, sources)?;
                     graph.into_sources_by_version(&project)?.sources.remove(&SolcLanguage::Solidity)
                 };
 
@@ -62,7 +63,7 @@ impl ProjectConfigInput {
             }
 
             SolcCompilerConfigInput::Specific(solc) => {
-                let graph = Graph::<SolData>::resolve_sources(&self.project_paths, sources)?;
+                let graph = Graph::<SolParser>::resolve_sources(&self.project_paths, sources)?;
                 let (sources, _) = graph.into_sources();
 
                 let versioned_sources = HashMap::from_iter(vec![(
