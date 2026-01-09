@@ -1,7 +1,7 @@
 use super::VyperLanguage;
 use crate::{
     compilers::{vyper::VYPER_EXTENSIONS, ParsedSource},
-    ProjectPathsConfig,
+    ProjectPathsConfig, SourceParser,
 };
 use foundry_compilers_core::{
     error::{Result, SolcError},
@@ -26,6 +26,19 @@ pub struct VyperImport {
     pub final_part: Option<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct VyperParser {
+    _inner: (),
+}
+
+impl SourceParser for VyperParser {
+    type ParsedSource = VyperParsedSource;
+
+    fn new(_config: &ProjectPathsConfig) -> Self {
+        Self { _inner: () }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct VyperParsedSource {
     path: PathBuf,
@@ -36,6 +49,7 @@ pub struct VyperParsedSource {
 impl ParsedSource for VyperParsedSource {
     type Language = VyperLanguage;
 
+    #[instrument(name = "VyperParsedSource::parse", skip_all)]
     fn parse(content: &str, file: &Path) -> Result<Self> {
         let version_req = capture_outer_and_inner(content, &RE_VYPER_VERSION, &["version"])
             .first()

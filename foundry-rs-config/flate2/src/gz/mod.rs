@@ -135,7 +135,7 @@ impl GzHeaderParser {
                     if self.flags & FRESERVED != 0 {
                         return Err(bad_header());
                     }
-                    self.header.mtime = ((buffer[4] as u32) << 0)
+                    self.header.mtime = (buffer[4] as u32)
                         | ((buffer[5] as u32) << 8)
                         | ((buffer[6] as u32) << 16)
                         | ((buffer[7] as u32) << 24);
@@ -402,8 +402,7 @@ impl GzBuilder {
         let mut header = vec![0u8; 10];
         if let Some(v) = extra {
             flg |= FEXTRA;
-            header.push((v.len() >> 0) as u8);
-            header.push((v.len() >> 8) as u8);
+            header.extend((v.len() as u16).to_le_bytes());
             header.extend(v);
         }
         if let Some(filename) = filename {
@@ -418,7 +417,7 @@ impl GzBuilder {
         header[1] = 0x8b;
         header[2] = 8;
         header[3] = flg;
-        header[4] = (mtime >> 0) as u8;
+        header[4] = mtime as u8;
         header[5] = (mtime >> 8) as u8;
         header[6] = (mtime >> 16) as u8;
         header[7] = (mtime >> 24) as u8;
@@ -513,7 +512,7 @@ mod tests {
                     if c & 1 != 0 {
                         c = 0xedb88320 ^ (c >> 1);
                     } else {
-                        c = c >> 1;
+                        c >>= 1;
                     }
                 }
                 crc.crc_table[n] = c;
@@ -552,7 +551,7 @@ mod tests {
             .into_header(Compression::fast());
 
         // Add a CRC to the header
-        header[3] = header[3] ^ super::FHCRC;
+        header[3] ^= super::FHCRC;
         let rfc1952_crc = Rfc1952Crc::new();
         let crc32 = rfc1952_crc.crc(&header);
         let crc16 = crc32 as u16;
@@ -575,7 +574,7 @@ mod tests {
 
     #[test]
     fn fields() {
-        let r = vec![0, 2, 4, 6];
+        let r = [0, 2, 4, 6];
         let e = GzBuilder::new()
             .filename("foo.rs")
             .comment("bar")

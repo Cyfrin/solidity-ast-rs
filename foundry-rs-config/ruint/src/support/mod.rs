@@ -6,6 +6,9 @@ mod alloy_rlp;
 mod arbitrary;
 mod ark_ff;
 mod ark_ff_04;
+mod ark_ff_05;
+mod bigdecimal;
+mod bincode_2;
 mod bn_rs;
 mod borsh;
 mod bytemuck;
@@ -22,6 +25,8 @@ mod proptest;
 mod pyo3;
 mod quickcheck;
 mod rand;
+mod rand_09;
+pub mod rkyv;
 mod rlp;
 pub mod scale;
 mod serde;
@@ -40,7 +45,6 @@ mod zeroize;
 // Big int types:
 // * https://crates.io/crates/crypto-bigint
 // * https://crates.io/crates/rug
-// * https://crates.io/crates/bigdecimal
 // * https://crates.io/crates/rust_decimal
 
 // * wasm-bindgen `JsValue` bigint: https://docs.rs/wasm-bindgen/latest/wasm_bindgen/struct.JsValue.html#method.bigint_from_str

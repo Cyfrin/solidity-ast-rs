@@ -56,8 +56,8 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
         // Exponentiation by squaring
         let mut overflow = false;
         let mut base_overflow = false;
-        let mut result = Self::from(1);
-        while exp != Self::ZERO {
+        let mut result = Self::ONE;
+        while !exp.is_zero() {
             // Multiply by base
             if exp.bit(0) {
                 let (r, o) = result.overflowing_mul(self);
@@ -100,8 +100,8 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
         }
 
         // Exponentiation by squaring
-        let mut result = Self::from(1);
-        while exp != Self::ZERO {
+        let mut result = Self::ONE;
+        while !exp.is_zero() {
             // Multiply by base
             if exp.bit(0) {
                 result = result.wrapping_mul(self);
@@ -181,12 +181,12 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
 mod tests {
     use super::*;
     use crate::{const_for, nlimbs};
-    use core::iter::repeat;
+    use core::iter::repeat_n;
     use proptest::proptest;
 
     #[test]
     fn test_pow2_shl() {
-        const_for!(BITS in NON_ZERO if (BITS >= 2) {
+        const_for!(BITS in NON_ZERO if BITS >= 2 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(e in 0..=BITS+1)| {
@@ -197,12 +197,12 @@ mod tests {
 
     #[test]
     fn test_pow_product() {
-        const_for!(BITS in NON_ZERO if (BITS >= 64) {
+        const_for!(BITS in NON_ZERO if BITS >= 64 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(b in 2_u64..100, e in 0_usize..100)| {
                 let b = U::from(b);
-                let prod = repeat(b).take(e).product();
+                let prod = repeat_n(b, e).product::<U>();
                 assert_eq!(b.pow(U::from(e)), prod);
             });
         });

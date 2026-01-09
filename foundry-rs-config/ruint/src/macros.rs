@@ -75,7 +75,6 @@ macro_rules! impl_bin_op {
     };
 }
 
-#[allow(unused)]
 macro_rules! assume {
     ($e:expr $(,)?) => {
         if !$e {
@@ -90,13 +89,57 @@ macro_rules! assume {
     };
 }
 
-#[allow(unused)]
 macro_rules! debug_unreachable {
     ($($t:tt)*) => {
         if cfg!(debug_assertions) {
             unreachable!($($t)*);
         } else {
             unsafe { core::hint::unreachable_unchecked() };
+        }
+    };
+}
+
+/// `let $id = &mut [0u64; nlimbs(2 * BITS)][..]`
+macro_rules! let_double_bits {
+    ($id:ident) => {
+        // This array casting is a workaround for `generic_const_exprs` not being
+        // stable.
+        let mut double = [[0u64; 2]; LIMBS];
+        let double_len = crate::nlimbs(2 * BITS);
+        debug_assert!(2 * LIMBS >= double_len);
+        // SAFETY: `[[u64; 2]; LIMBS] == [u64; 2 * LIMBS] >= [u64; nlimbs(2 * BITS)]`.
+        let $id = unsafe {
+            core::slice::from_raw_parts_mut(double.as_mut_ptr().cast::<u64>(), double_len)
+        };
+    };
+}
+
+/// Specialize an operation for u64, u128, u256 ([u128; 2])...
+macro_rules! as_primitives {
+    ($uint:expr, { $($arm:ident $t:tt => $e:expr),* $(,)? }) => {
+        $(
+            as_primitives!(@arm $uint; $arm $t => $e);
+        )*
+    };
+
+    (@arm $uint:expr; u64($n:ident) => $e:expr) => {
+        if LIMBS == 1 {
+            let $n = $uint.limbs[0];
+            $e
+        }
+    };
+    (@arm $uint:expr; u128($n:ident) => $e:expr) => {
+        if LIMBS == 2 {
+            let $n = $uint.as_double_words()[0].get();
+            $e
+        }
+    };
+    (@arm $uint:expr; u256($lo:ident, $hi:ident) => $e:expr) => {
+        if LIMBS == 4 {
+            let &[lo, hi] = $uint.as_double_words() else { unreachable!() };
+            let $lo = lo.get();
+            let $hi = hi.get();
+            $e
         }
     };
 }

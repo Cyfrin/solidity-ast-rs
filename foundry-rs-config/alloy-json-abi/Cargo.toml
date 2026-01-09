@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.85"
 name = "alloy-json-abi"
-version = "0.8.22"
+version = "1.5.2"
 authors = ["Alloy Contributors"]
 build = false
 exclude = ["tests"]
@@ -38,6 +38,7 @@ categories = [
 ]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alloy-rs/core"
+resolver = "2"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -67,12 +68,12 @@ path = "benches/json_abi.rs"
 harness = false
 
 [dependencies.alloy-primitives]
-version = "0.8.22"
+version = "1.5.2"
 features = ["serde"]
 default-features = false
 
 [dependencies.alloy-sol-type-parser]
-version = "0.8.22"
+version = "1.5.2"
 features = ["serde"]
 default-features = false
 
@@ -91,7 +92,7 @@ optional = true
 default-features = false
 
 [dev-dependencies.criterion]
-version = "0.5"
+version = "0.7"
 
 [dev-dependencies.ethabi]
 version = "18"

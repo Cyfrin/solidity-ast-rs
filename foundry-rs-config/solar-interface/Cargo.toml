@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.83"
+edition = "2024"
+rust-version = "1.88"
 name = "solar-interface"
-version = "0.1.2"
+version = "0.1.8"
 authors = ["DaniPopes <57450786+DaniPopes@users.noreply.github.com>"]
 build = false
 autolib = false
@@ -38,12 +38,14 @@ categories = [
 ]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/solar"
+resolver = "2"
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = [
-    "--cfg",
-    "docsrs",
+    "-Zunstable-options",
+    "--generate-link-to-definition",
+    "--show-type-layout",
 ]
 
 [features]
@@ -61,7 +63,7 @@ name = "solar_interface"
 path = "src/lib.rs"
 
 [dependencies.annotate-snippets]
-version = "0.11.5"
+version = "0.12"
 features = ["simd"]
 
 [dependencies.anstream]
@@ -70,9 +72,6 @@ version = "0.6.18"
 [dependencies.anstyle]
 version = "1.0"
 
-[dependencies.derive_builder]
-version = "0.20.2"
-
 [dependencies.derive_more]
 version = "2.0"
 features = ["full"]
@@ -80,9 +79,8 @@ features = ["full"]
 [dependencies.dunce]
 version = "1"
 
-[dependencies.hex]
-version = "1.10"
-package = "const-hex"
+[dependencies.inturn]
+version = "0.1.0"
 
 [dependencies.itertools]
 version = ">=0.10, <=0.14"
@@ -90,24 +88,16 @@ version = ">=0.10, <=0.14"
 [dependencies.itoa]
 version = "1.0"
 
-[dependencies.lasso]
-version = "0.7.3"
-features = [
-    "multi-threaded",
-    "inline-more",
-]
-
-[dependencies.match_cfg]
-version = "0.1"
-
 [dependencies.normalize-path]
 version = "0.2.1"
 
+[dependencies.once_map]
+version = "0.4.20"
+features = ["std"]
+default-features = false
+
 [dependencies.rayon]
 version = "1.8"
-
-[dependencies.scc]
-version = "2"
 
 [dependencies.scoped-tls]
 version = "1.0"
@@ -122,19 +112,19 @@ version = "1.0"
 optional = true
 
 [dependencies.solar-config]
-version = "0.1.2"
+version = "=0.1.8"
 default-features = false
 
 [dependencies.solar-data-structures]
-version = "0.1.2"
+version = "=0.1.8"
 default-features = false
 
 [dependencies.solar-macros]
-version = "0.1.2"
+version = "=0.1.8"
 default-features = false
 
 [dependencies.thiserror]
-version = ">=1.0"
+version = ">=1"
 
 [dependencies.tracing]
 version = "0.1"

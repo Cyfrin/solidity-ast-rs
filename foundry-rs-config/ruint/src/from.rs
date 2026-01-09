@@ -123,6 +123,19 @@ impl fmt::Display for ToFieldError {
 }
 
 impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
+    /// Constructs a new [`Uint`] from a u64.
+    ///
+    /// Saturates at the maximum value of the [`Uint`] if the value is too
+    /// large.
+    pub(crate) const fn const_from_u64(x: u64) -> Self {
+        if BITS == 0 || (BITS < 64 && x >= 1 << BITS) {
+            return Self::MAX;
+        }
+        let mut limbs = [0; LIMBS];
+        limbs[0] = x;
+        Self::from_limbs(limbs)
+    }
+
     /// Construct a new [`Uint`] from the value.
     ///
     /// # Panics
@@ -303,6 +316,37 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     ) -> Option<Self> {
         Self::checked_from_limbs_slice(value.as_limbs())
     }
+
+    /// Returns `true` if `self` is larger than 64 bits.
+    #[inline]
+    fn gt_u64_max(&self) -> bool {
+        self.limbs_gt(1)
+    }
+
+    /// Returns `true` if `self` is larger than 128 bits.
+    #[inline]
+    fn gt_u128_max(&self) -> bool {
+        self.limbs_gt(2)
+    }
+
+    /// Returns `true` if `self` is larger than `64 * n` bits.
+    #[inline]
+    fn limbs_gt(&self, n: usize) -> bool {
+        if LIMBS < n {
+            return false;
+        }
+
+        if BITS <= 512 {
+            // Use branchless `bitor` chain for smaller integers.
+            self.as_limbs()[n..]
+                .iter()
+                .copied()
+                .fold(0u64, core::ops::BitOr::bitor)
+                != 0
+        } else {
+            self.bit_len() > 64 * n
+        }
+    }
 }
 
 /// ⚠️ Workaround for [Rust issue #50133](https://github.com/rust-lang/rust/issues/50133).
@@ -382,18 +426,15 @@ impl<const BITS: usize, const LIMBS: usize> TryFrom<u64> for Uint<BITS, LIMBS> {
 
     #[inline]
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        if LIMBS <= 1 {
-            if value > Self::MASK {
-                // Construct wrapped value
-                let mut limbs = [0; LIMBS];
-                if LIMBS == 1 {
-                    limbs[0] = value & Self::MASK;
-                }
-                return Err(ToUintError::ValueTooLarge(BITS, Self::from_limbs(limbs)));
+        match LIMBS {
+            0 | 1 if value > Self::MASK => {
+                return Err(ToUintError::ValueTooLarge(
+                    BITS,
+                    Self::from_limbs([value & Self::MASK; LIMBS]),
+                ));
             }
-            if LIMBS == 0 {
-                return Ok(Self::ZERO);
-            }
+            0 => return Ok(Self::ZERO),
+            _ => {}
         }
         let mut limbs = [0; LIMBS];
         limbs[0] = value;
@@ -412,15 +453,15 @@ impl<const BITS: usize, const LIMBS: usize> TryFrom<u128> for Uint<BITS, LIMBS> 
         if value <= u64::MAX as u128 {
             return Self::try_from(value as u64);
         }
-        if Self::LIMBS < 2 {
+        if LIMBS < 2 {
             return Self::try_from(value as u64)
                 .and_then(|n| Err(ToUintError::ValueTooLarge(BITS, n)));
         }
         let mut limbs = [0; LIMBS];
         limbs[0] = value as u64;
         limbs[1] = (value >> 64) as u64;
-        if Self::LIMBS == 2 && limbs[1] > Self::MASK {
-            limbs[1] %= Self::MASK;
+        if LIMBS == 2 && limbs[1] > Self::MASK {
+            limbs[1] &= Self::MASK;
             Err(ToUintError::ValueTooLarge(BITS, Self::from_limbs(limbs)))
         } else {
             Ok(Self::from_limbs(limbs))
@@ -479,77 +520,140 @@ impl_from_signed_int!(i64, u64);
 impl_from_signed_int!(i128, u128);
 impl_from_signed_int!(isize, usize);
 
-#[cfg(feature = "std")]
 impl<const BITS: usize, const LIMBS: usize> TryFrom<f64> for Uint<BITS, LIMBS> {
     type Error = ToUintError<Self>;
 
-    // TODO: Correctly implement wrapping.
     #[inline]
     fn try_from(value: f64) -> Result<Self, Self::Error> {
-        if value.is_nan() {
-            return Err(ToUintError::NotANumber(BITS));
-        }
-        if value < 0.0 {
-            let wrapped = match Self::try_from(value.abs()) {
-                Ok(n) | Err(ToUintError::ValueTooLarge(_, n)) => n,
-                _ => Self::ZERO,
+        // Mimics Rust's own float-to-int conversion
+        // https://github.com/rust-lang/compiler-builtins/blob/f4c7940d3b13ec879c9fdc218812f71a65149123/src/float/conv.rs#L163
+
+        let f = value;
+        let fixint_bits = Self::BITS;
+
+        let sign_bit = 0x8000_0000_0000_0000u64;
+        let significand_bits = 52usize;
+        let exponent_bias = 1023usize;
+        const HALF_BITS: u64 = 0.5f64.to_bits();
+
+        // Break into sign, exponent, significand
+        let a_rep = f.to_bits();
+        let a_abs = a_rep & !sign_bit;
+
+        let sign = if (a_rep & sign_bit) == 0 {
+            if a_rep < HALF_BITS {
+                return Ok(Self::ZERO);
             }
-            .wrapping_neg();
-            return Err(ToUintError::ValueNegative(BITS, wrapped));
-        }
-        #[allow(clippy::cast_precision_loss)] // BITS is small-ish
-        let modulus = (Self::BITS as f64).exp2();
-        if value >= modulus {
-            let wrapped = match Self::try_from(value % modulus) {
-                Ok(n) | Err(ToUintError::ValueTooLarge(_, n)) => n,
-                _ => Self::ZERO,
-            };
-            return Err(ToUintError::ValueTooLarge(BITS, wrapped)); // Wrapping
-        }
-        if value < 0.5 {
-            return Ok(Self::ZERO);
-        }
-        // All non-normal cases should have been handled above
-        assert!(value.is_normal());
-
-        // Add offset to round to nearest integer.
-        let value = value + 0.5;
-
-        // Parse IEEE-754 double
-        // Sign should be zero, exponent should be >= 0.
-        let bits = value.to_bits();
-        let sign = bits >> 63;
-        assert!(sign == 0);
-        let biased_exponent = (bits >> 52) & 0x7ff;
-        assert!(biased_exponent >= 1023);
-        let exponent = biased_exponent - 1023;
-        let fraction = bits & 0x000f_ffff_ffff_ffff;
-        let mantissa = 0x0010_0000_0000_0000 | fraction;
-
-        // Convert mantissa * 2^(exponent - 52) to Uint
-        #[allow(clippy::cast_possible_truncation)] // exponent is small-ish
-        if exponent as usize > Self::BITS + 52 {
-            // Wrapped value is zero because the value is extended with zero bits.
-            return Err(ToUintError::ValueTooLarge(BITS, Self::ZERO));
-        }
-        if exponent <= 52 {
-            // Truncate mantissa
-            Self::try_from(mantissa >> (52 - exponent))
+            Sign::Positive
         } else {
-            #[allow(clippy::cast_possible_truncation)] // exponent is small-ish
-            let exponent = exponent as usize - 52;
-            let n = Self::try_from(mantissa)?;
-            let (n, overflow) = n.overflowing_shl(exponent);
-            if overflow {
-                Err(ToUintError::ValueTooLarge(BITS, n))
+            if a_abs == 0 {
+                return Ok(Self::ZERO);
+            }
+            Sign::Negative
+        };
+        let mut exponent = (a_abs >> significand_bits) as usize;
+        let significand = (a_abs & ((1u64 << significand_bits) - 1)) | (1u64 << significand_bits);
+
+        let from_lossy = |x| match Self::uint_try_from(x) {
+            Ok(n) => n,
+            Err(ToUintError::ValueTooLarge(_, n)) => n,
+            _ => unreachable!(),
+        };
+
+        // Helper: produce integer magnitude for |f| given an unbiased exponent `e`,
+        // using round-to-nearest, ties-to-even, then interpreted modulo 2^BITS by Uint.
+        let compute_mag = |e: usize| -> Self {
+            if e < significand_bits {
+                // Right shift with round-to-nearest, ties-to-even
+                let shift = significand_bits - e; // shift >= 1 here
+                let mut r = significand >> shift;
+                let remainder = significand & ((1u64 << shift) - 1);
+                let halfway = 1u64 << (shift - 1);
+                if remainder > halfway || (remainder == halfway && (r & 1) == 1) {
+                    r = r.wrapping_add(1);
+                }
+                from_lossy(r)
             } else {
-                Ok(n)
+                // Left shift; Uint shifts are modulo 2^BITS already.
+                from_lossy(significand).wrapping_shl(e - significand_bits)
+            }
+        };
+
+        // Negative values: return ValueNegative with wrapped two's-complement payload.
+        // Handle |value| < 1 without going through the saturating exponent path to
+        // preserve correct rounding: ties-to-even at 0.5, otherwise nearest.
+        if sign == Sign::Negative {
+            if exponent < exponent_bias {
+                // |value| < 1
+                // Rounds to 0 for −0.5 ≤ value < 0.0, and to 1 for −1.0 < value < −0.5.
+                if value >= -0.5 {
+                    return Err(ToUintError::ValueNegative(BITS, Self::ZERO));
+                } else {
+                    let wrapped = Self::ZERO.wrapping_sub(Self::ONE);
+                    return Err(ToUintError::ValueNegative(BITS, wrapped));
+                }
+            } else {
+                // |value| >= 1: compute magnitude normally with unbiased exponent.
+                let e = exponent - exponent_bias;
+                let mag = compute_mag(e);
+                let wrapped = Self::ZERO.wrapping_sub(mag);
+                return Err(ToUintError::ValueNegative(BITS, wrapped));
             }
         }
+
+        // Positive and exponent indicates |value| < 1
+        if exponent < exponent_bias {
+            return if BITS == 0 {
+                Err(ToUintError::ValueTooLarge(BITS, Self::ZERO))
+            } else {
+                // We already handled value < 0.5 above; here 0.5 <= value < 1.0 → 1.
+                Ok(Self::ONE)
+            };
+        }
+        exponent -= exponent_bias;
+
+        // If the value is infinity, saturate.
+        // If the value is too large for the integer type, wrap (drop high bits) and
+        // return it in the error.
+        if exponent >= fixint_bits {
+            if value.is_nan() {
+                return Err(ToUintError::NotANumber(BITS));
+            }
+
+            let mag = compute_mag(exponent);
+            let wrapped = match sign {
+                Sign::Positive => mag,
+                Sign::Negative => Self::ZERO.wrapping_sub(mag),
+            };
+            return match sign {
+                Sign::Positive => Err(ToUintError::ValueTooLarge(BITS, wrapped)),
+                Sign::Negative => Err(ToUintError::ValueNegative(BITS, wrapped)),
+            };
+        }
+
+        // In-range: produce the integer normally.
+        let r = compute_mag(exponent);
+
+        // Match old impl: if rounding bumps us across 2^BITS (only possible when
+        // exponent == BITS - 1), report ValueTooLarge with the wrapped payload.
+        if sign == Sign::Positive
+            && fixint_bits > 0
+            && exponent == fixint_bits - 1
+            && r == Self::ZERO
+        {
+            return Err(ToUintError::ValueTooLarge(BITS, r));
+        }
+
+        Ok(r)
     }
 }
 
-#[cfg(feature = "std")]
+#[derive(PartialEq)]
+enum Sign {
+    Positive,
+    Negative,
+}
+
 impl<const BITS: usize, const LIMBS: usize> TryFrom<f32> for Uint<BITS, LIMBS> {
     type Error = ToUintError<Self>;
 
@@ -586,10 +690,10 @@ impl<const BITS: usize, const LIMBS: usize> TryFrom<&Uint<BITS, LIMBS>> for bool
         if BITS == 0 {
             return Ok(false);
         }
-        if value.bit_len() > 1 {
+        if value.gt_u64_max() || value.limbs[0] > 1 {
             return Err(Self::Error::Overflow(BITS, value.bit(0), true));
         }
-        Ok(value.as_limbs()[0] != 0)
+        Ok(value.limbs[0] != 0)
     }
 }
 
@@ -603,19 +707,17 @@ macro_rules! to_int {
             #[inline]
             #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             fn try_from(value: &Uint<BITS, LIMBS>) -> Result<Self, Self::Error> {
-                const SIGNED: bool = <$int>::MIN != 0;
-                const CAPACITY: usize = if SIGNED { <$int>::BITS - 1 } else { <$int>::BITS } as usize;
                 if BITS == 0 {
                     return Ok(0);
                 }
-                if value.bit_len() > CAPACITY {
+                if value.gt_u64_max() || value.limbs[0] > (Self::MAX as u64) {
                     return Err(Self::Error::Overflow(
                         BITS,
                         value.limbs[0] as Self,
                         Self::MAX,
                     ));
                 }
-                Ok(value.as_limbs()[0] as Self)
+                Ok(value.limbs[0] as Self)
             }
         }
     )*};
@@ -629,21 +731,18 @@ impl<const BITS: usize, const LIMBS: usize> TryFrom<&Uint<BITS, LIMBS>> for i128
     type Error = FromUintError<Self>;
 
     #[inline]
+    #[allow(clippy::cast_possible_wrap)] // Intentional.
     #[allow(clippy::cast_lossless)] // Safe casts
     #[allow(clippy::use_self)] // More readable
     fn try_from(value: &Uint<BITS, LIMBS>) -> Result<Self, Self::Error> {
-        if BITS == 0 {
-            return Ok(0);
-        }
-        let mut result = value.limbs[0] as i128;
         if BITS <= 64 {
-            return Ok(result);
+            return Ok(u64::try_from(value).unwrap().into());
         }
-        result |= (value.limbs[1] as i128) << 64;
-        if value.bit_len() > 127 {
-            return Err(Self::Error::Overflow(BITS, result, i128::MAX));
+        let result = value.as_double_words()[0].get();
+        if value.gt_u128_max() || result > i128::MAX as u128 {
+            return Err(Self::Error::Overflow(BITS, result as i128, i128::MAX));
         }
-        Ok(result)
+        Ok(result as i128)
     }
 }
 
@@ -656,15 +755,11 @@ impl<const BITS: usize, const LIMBS: usize> TryFrom<&Uint<BITS, LIMBS>> for u128
     #[allow(clippy::cast_lossless)] // Safe casts
     #[allow(clippy::use_self)] // More readable
     fn try_from(value: &Uint<BITS, LIMBS>) -> Result<Self, Self::Error> {
-        if BITS == 0 {
-            return Ok(0);
-        }
-        let mut result = value.limbs[0] as u128;
         if BITS <= 64 {
-            return Ok(result);
+            return Ok(u64::try_from(value).unwrap().into());
         }
-        result |= (value.limbs[1] as u128) << 64;
-        if value.bit_len() > 128 {
+        let result = value.as_double_words()[0].get();
+        if value.gt_u128_max() {
             return Err(Self::Error::Overflow(BITS, result, u128::MAX));
         }
         Ok(result)
@@ -673,7 +768,6 @@ impl<const BITS: usize, const LIMBS: usize> TryFrom<&Uint<BITS, LIMBS>> for u128
 
 // Convert Uint to floating point
 
-#[cfg(feature = "std")]
 impl<const BITS: usize, const LIMBS: usize> From<Uint<BITS, LIMBS>> for f32 {
     #[inline]
     fn from(value: Uint<BITS, LIMBS>) -> Self {
@@ -681,7 +775,6 @@ impl<const BITS: usize, const LIMBS: usize> From<Uint<BITS, LIMBS>> for f32 {
     }
 }
 
-#[cfg(feature = "std")]
 impl<const BITS: usize, const LIMBS: usize> From<&Uint<BITS, LIMBS>> for f32 {
     /// Approximate single precision float.
     ///
@@ -689,12 +782,10 @@ impl<const BITS: usize, const LIMBS: usize> From<&Uint<BITS, LIMBS>> for f32 {
     #[inline]
     #[allow(clippy::cast_precision_loss)] // Documented
     fn from(value: &Uint<BITS, LIMBS>) -> Self {
-        let (bits, exponent) = value.most_significant_bits();
-        (bits as Self) * (exponent as Self).exp2()
+        f64::from(value) as f32
     }
 }
 
-#[cfg(feature = "std")]
 impl<const BITS: usize, const LIMBS: usize> From<Uint<BITS, LIMBS>> for f64 {
     #[inline]
     fn from(value: Uint<BITS, LIMBS>) -> Self {
@@ -702,16 +793,78 @@ impl<const BITS: usize, const LIMBS: usize> From<Uint<BITS, LIMBS>> for f64 {
     }
 }
 
-#[cfg(feature = "std")]
 impl<const BITS: usize, const LIMBS: usize> From<&Uint<BITS, LIMBS>> for f64 {
     /// Approximate double precision float.
     ///
     /// Returns `f64::INFINITY` if the value is too large to represent.
     #[inline]
-    #[allow(clippy::cast_precision_loss)] // Documented
     fn from(value: &Uint<BITS, LIMBS>) -> Self {
-        let (bits, exponent) = value.most_significant_bits();
-        (bits as Self) * (exponent as Self).exp2()
+        Self::from_bits(value.as_f64_bits())
+    }
+}
+
+impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
+    /// Convert to IEEE 754 double precision float bit representation.
+    #[inline]
+    fn as_f64_bits(&self) -> u64 {
+        as_primitives!(self, {
+            u64(x) => return f64::to_bits(x as f64),
+        });
+
+        const SIG: usize = f64::MANTISSA_DIGITS as usize; // includes the hidden bit
+
+        let sd = self.bit_len(); // 0 for zero
+        if sd == 0 {
+            return 0;
+        }
+
+        // Early +∞ if exponent field is already saturated before rounding.
+        // e_pre = 1021 + sd; saturation when e_pre >= 0x7ff <=> sd >= 1026
+        if sd >= 1026 {
+            return 0x7ff0_0000_0000_0000;
+        }
+
+        let e_pre = 1021u64 + sd as u64;
+
+        // Fits entirely in the 53-bit significand: normalize, no rounding.
+        if sd <= SIG {
+            // value < 2^53, so it lives in limb 0
+            let a = self.as_limbs().first().copied().unwrap_or(0) << (SIG - sd);
+            return (e_pre << 52) + a;
+        }
+
+        // sd > SIG: need guard/sticky. Extract a 54-bit window [MSB .. MSB-53].
+        let msb = sd - 1;
+        let li = msb >> 6;
+        let off = (msb & 63) as u32;
+
+        let limbs = self.as_limbs();
+        let hi = limbs[li];
+        let lo = if li > 0 { limbs[li - 1] } else { 0 };
+
+        // Concatenate [hi:64][lo:64] and drop the low bits so the 54-bit window is at
+        // LSB. Correct alignment: shift = 64 + off - SIG  (not SIG+1!)
+        let shift = 64 + off as usize - SIG; // range 11..=74
+        debug_assert!((11..=74).contains(&shift));
+
+        let w = ((hi as u128) << 64) | (lo as u128);
+        let win54 = (w >> shift) as u64; // low 54 bits are [MSB .. MSB-53]
+
+        let a = win54 >> 1; // 53-bit mantissa incl. hidden bit
+        let guard = (win54 & 1) != 0;
+
+        // Sticky = any bit strictly below guard.
+        // That’s equivalent to: trailing_zeros(value) < guard_pos
+        // where guard_pos = sd - SIG - 1 (# bits below guard).
+        let guard_pos = sd - SIG - 1;
+        let sticky = guard_pos != 0 && self.trailing_zeros() < guard_pos;
+
+        // Round to nearest, ties-to-even.
+        let round_up = guard && (sticky || ((a & 1) != 0));
+        let m = a + (round_up as u64);
+
+        // Combine with '+' so a carry out of m bumps the exponent.
+        (e_pre << 52) + m
     }
 }
 
@@ -719,6 +872,7 @@ impl<const BITS: usize, const LIMBS: usize> From<&Uint<BITS, LIMBS>> for f64 {
 mod test {
     use super::*;
     use crate::{const_for, nlimbs};
+    use proptest::proptest;
 
     #[test]
     fn test_u64() {
@@ -735,13 +889,52 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    fn test_u64_max() {
+        assert_eq!(
+            Uint::<64, 1>::try_from(u64::MAX),
+            Ok(Uint::from_limbs([u64::MAX]))
+        );
+        assert_eq!(
+            Uint::<64, 1>::try_from(u64::MAX as u128),
+            Ok(Uint::from_limbs([u64::MAX]))
+        );
+        assert_eq!(
+            Uint::<64, 1>::try_from(u64::MAX as u128 + 1),
+            Err(ToUintError::ValueTooLarge(64, Uint::ZERO))
+        );
+
+        assert_eq!(
+            Uint::<128, 2>::try_from(u64::MAX),
+            Ok(Uint::from_limbs([u64::MAX, 0]))
+        );
+        assert_eq!(
+            Uint::<128, 2>::try_from(u64::MAX as u128),
+            Ok(Uint::from_limbs([u64::MAX, 0]))
+        );
+        assert_eq!(
+            Uint::<128, 2>::try_from(u64::MAX as u128 + 1),
+            Ok(Uint::from_limbs([0, 1]))
+        );
+    }
+
+    #[test]
+    fn test_u65() {
+        let x = uint!(18446744073711518810_U65);
+        assert_eq!(x.bit_len(), 65);
+        assert_eq!(
+            u64::try_from(x),
+            Err(FromUintError::Overflow(65, 1967194, u64::MAX))
+        );
+    }
+
+    #[test]
     fn test_f64() {
         assert_eq!(Uint::<0, 0>::try_from(0.0_f64), Ok(Uint::ZERO));
         const_for!(BITS in NON_ZERO {
             const LIMBS: usize = nlimbs(BITS);
             assert_eq!(Uint::<BITS, LIMBS>::try_from(0.0_f64), Ok(Uint::ZERO));
             assert_eq!(Uint::<BITS, LIMBS>::try_from(1.0_f64).unwrap().as_limbs()[0], 1);
+            assert_eq!(Uint::<BITS, LIMBS>::try_from(-1.0_f64), old_uint_try_from::<BITS, LIMBS>(-1.0_f64));
         });
         assert_eq!(
             Uint::<7, 1>::try_from(123.499_f64),
@@ -751,5 +944,223 @@ mod test {
             Uint::<7, 1>::try_from(123.500_f64),
             Ok(Uint::from_limbs([124]))
         );
+    }
+
+    #[test]
+    fn all_integers_are_representable() {
+        const MAX_SAFE_INTEGER: u64 = (1 << f64::MANTISSA_DIGITS) - 1;
+        proptest!(|(value in 0..=MAX_SAFE_INTEGER)| {
+            let from_float = Uint::<64, 1>::try_from(value as f64).unwrap();
+            let from_int = Uint::<64, 1>::try_from(value).unwrap();
+            assert_eq!(from_float, from_int);
+        });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_old_new_impl_from_f64_equivalent() {
+        const_for!(BITS in SIZES {
+            const LIMBS: usize = nlimbs(BITS);
+            proptest!(|(value: f64)| {
+                let old = old_uint_try_from::<BITS, LIMBS>(value);
+                let new = Uint::<BITS, LIMBS>::try_from(value);
+                match (old, new) {
+                    (Ok(expected), Ok(actual)) => {
+                        assert!(
+                            expected == actual || (expected == actual + Uint::ONE),
+                            "assertion failed: `(expected == actual)`\nexpected: {:?}\n  actual: {:?}\n{}",
+                            expected,
+                            actual,
+                            format_args!("BITS = {BITS}, value = {value}")
+                        )
+                    }
+                    (Err(ToUintError::ValueTooLarge(_, expected)), Err(ToUintError::ValueTooLarge(_, actual))) => {
+                        assert!(
+                            expected == actual || (expected == actual + Uint::ONE),
+                            "assertion failed: `(expected == actual)`\nexpected: {:?}\n  actual: {:?}\n{}",
+                            expected,
+                            actual,
+                            format_args!("BITS = {BITS}, value = {value}")
+                        )
+                    }
+                    (Err(ToUintError::ValueNegative(_, expected)), Err(ToUintError::ValueNegative(_, actual))) => {
+                        assert!(
+                            expected == actual || (expected == actual + Uint::ONE),
+                            "assertion failed: `(expected == actual)`\nexpected: {:?}\n  actual: {:?}\n{}",
+                            expected,
+                            actual,
+                            format_args!("BITS = {BITS}, value = {value}")
+                        )
+                    }
+                    (old, new) => assert_eq!(old, new, "BITS = {BITS}, value = {value}")
+                };
+            });
+        });
+    }
+
+    #[test]
+    fn all_floats_are_representable() {
+        const MAX_SAFE_INTEGER: u64 = (1 << f64::MANTISSA_DIGITS) - 1;
+        proptest!(|(value in 0..=MAX_SAFE_INTEGER)| {
+            let uint = Uint::<64, 1>::try_from(value).unwrap();
+
+            let old = value as f64;
+            let new = f64::from(&uint);
+            assert_eq!(old, new);
+        });
+    }
+
+    #[test]
+    fn small_uints_work_correctly() {
+        const_for!(BITS in [1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64] {
+            const LIMBS: usize = nlimbs(BITS);
+            proptest!(|(value in 0..(1u128 << BITS))| {
+                let uint = Uint::<BITS, LIMBS>::try_from(value).unwrap();
+
+                let old = value as f64;
+                let new = f64::from(&uint);
+                assert_eq!(old, new);
+
+                let old = value as f32;
+                let new = f32::from(&uint);
+                assert_eq!(old, new);
+            });
+        });
+    }
+
+    #[test]
+    fn number_too_large_is_infinity() {
+        const F64_BITS: usize = 1100;
+        const F_64LIMBS: usize = nlimbs(F64_BITS);
+
+        const F32_BITS: usize = F64_BITS / 2;
+        const F_32LIMBS: usize = nlimbs(F32_BITS);
+
+        assert!(f64::from(Uint::<F64_BITS, F_64LIMBS>::MAX).is_infinite());
+        assert!(f32::from(Uint::<F32_BITS, F_32LIMBS>::MAX).is_infinite());
+    }
+
+    #[cfg(feature = "std")]
+    fn old_uint_to_f64<const BITS: usize, const LIMBS: usize>(value: &Uint<BITS, LIMBS>) -> f64 {
+        let (bits, exponent) = value.most_significant_bits();
+        (bits as f64) * (exponent as f64).exp2()
+    }
+
+    #[cfg(feature = "std")]
+    fn old_uint_to_f32<const BITS: usize, const LIMBS: usize>(value: &Uint<BITS, LIMBS>) -> f32 {
+        let (bits, exponent) = value.most_significant_bits();
+        (bits as f32) * (exponent as f32).exp2()
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_old_new_impl_to_f64_equivalent() {
+        const_for!(BITS in SIZES {
+            const LIMBS: usize = nlimbs(BITS);
+            type U = Uint::<BITS, LIMBS>;
+            proptest!(|(value: U)| {
+                let expected = old_uint_to_f64::<BITS, LIMBS>(&value);
+                let actual = f64::from(&value);
+
+                let expected_bits = expected.to_bits();
+                let actual_bits = actual.to_bits();
+                assert!(
+                    expected_bits == actual_bits || (expected_bits == actual_bits + 1) || (expected_bits + 1 == actual_bits),
+                    "assertion failed: `(expected == actual)`\nexpected: {:?}\n  actual: {:?}\n{}",
+                    expected,
+                    actual,
+                    format_args!("BITS = {BITS}, value = {value}")
+                )
+            });
+        });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_old_new_impl_to_f32_equivalent() {
+        const_for!(BITS in SIZES {
+            const LIMBS: usize = nlimbs(BITS);
+            type U = Uint::<BITS, LIMBS>;
+            proptest!(|(value: U)| {
+                let expected = old_uint_to_f32::<BITS, LIMBS>(&value);
+                let actual = f32::from(&value);
+
+                let expected_bits = expected.to_bits();
+                let actual_bits = actual.to_bits();
+                assert!(
+                    expected_bits == actual_bits || (expected_bits == actual_bits + 1) || (expected_bits + 1 == actual_bits),
+                    "assertion failed: `(expected == actual)`\nexpected: {:?}\n  actual: {:?}\n{}",
+                    expected,
+                    actual,
+                    format_args!("BITS = {BITS}, value = {value}")
+                )
+            });
+        });
+    }
+
+    #[cfg(feature = "std")]
+    fn old_uint_try_from<const BITS: usize, const LIMBS: usize>(
+        value: f64,
+    ) -> Result<Uint<BITS, LIMBS>, ToUintError<Uint<BITS, LIMBS>>> {
+        if value.is_nan() {
+            return Err(ToUintError::NotANumber(BITS));
+        }
+        if value < 0.0 {
+            let wrapped = match Uint::try_from(value.abs()) {
+                Ok(n) | Err(ToUintError::ValueTooLarge(_, n)) => n,
+                _ => Uint::ZERO,
+            }
+            .wrapping_neg();
+            return Err(ToUintError::ValueNegative(BITS, wrapped));
+        }
+        #[allow(clippy::cast_precision_loss)] // BITS is small-ish
+        let modulus = (BITS as f64).exp2();
+        if value >= modulus {
+            let wrapped = match Uint::try_from(value % modulus) {
+                Ok(n) | Err(ToUintError::ValueTooLarge(_, n)) => n,
+                _ => Uint::ZERO,
+            };
+            return Err(ToUintError::ValueTooLarge(BITS, wrapped)); // Wrapping
+        }
+        if value < 0.5 {
+            return Ok(Uint::ZERO);
+        }
+        // All non-normal cases should have been handled above
+        assert!(value.is_normal());
+
+        // Add offset to round to nearest integer.
+        let value = value + 0.5;
+
+        // Parse IEEE-754 double
+        // Sign should be zero, exponent should be >= 0.
+        let bits = value.to_bits();
+        let sign = bits >> 63;
+        assert!(sign == 0);
+        let biased_exponent = (bits >> 52) & 0x7ff;
+        assert!(biased_exponent >= 1023);
+        let exponent = biased_exponent - 1023;
+        let fraction = bits & 0x000f_ffff_ffff_ffff;
+        let mantissa = 0x0010_0000_0000_0000 | fraction;
+
+        // Convert mantissa * 2^(exponent - 52) to Uint
+        #[allow(clippy::cast_possible_truncation)] // exponent is small-ish
+        if exponent as usize > BITS + 52 {
+            // Wrapped value is zero because the value is extended with zero bits.
+            return Err(ToUintError::ValueTooLarge(BITS, Uint::ZERO));
+        }
+        if exponent <= 52 {
+            // Truncate mantissa
+            Uint::try_from(mantissa >> (52 - exponent))
+        } else {
+            #[allow(clippy::cast_possible_truncation)] // exponent is small-ish
+            let exponent = exponent as usize - 52;
+            let n = Uint::try_from(mantissa)?;
+            let (n, overflow) = n.overflowing_shl(exponent);
+            if overflow {
+                Err(ToUintError::ValueTooLarge(BITS, n))
+            } else {
+                Ok(n)
+            }
+        }
     }
 }

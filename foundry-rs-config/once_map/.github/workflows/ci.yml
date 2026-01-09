@@ -1,0 +1,34 @@
+on: [push, pull_request]
+
+name: CI
+
+jobs:
+  check:
+    name: Run tests and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: cargo clippy --all-features -- -D warnings
+      - run: cargo test
+      - run: cargo test --all-features
+
+  check-no_std:
+    name: Check no_std
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: rustup target add aarch64-unknown-none
+
+      - name: cargo check
+        run: cargo check --target aarch64-unknown-none --no-default-features --features ahash
+
+  fmt:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: cargo fmt -- --check

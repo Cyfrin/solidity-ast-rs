@@ -14,7 +14,7 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::literal_string_with_formatting_args)] // TODO: https://github.com/rust-lang/rust-clippy/issues/13885
 
 #[macro_use]
@@ -32,7 +32,7 @@ pub use item::{AbiItem, Constructor, Error, Event, Fallback, Function, Receive};
 mod param;
 pub use param::{EventParam, Param};
 
-pub use parser::{serde_state_mutability_compat, StateMutability};
+pub use parser::{StateMutability, serde_state_mutability_compat};
 
 mod internal_type;
 pub use internal_type::InternalType;

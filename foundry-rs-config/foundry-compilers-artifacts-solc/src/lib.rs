@@ -2,14 +2,13 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(ambiguous_glob_reexports)]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[macro_use]
 extern crate tracing;
 
 use semver::Version;
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     collections::{BTreeMap, HashSet},
     fmt,
@@ -231,7 +230,8 @@ impl From<SolcInput> for StandardJsonCompilerInput {
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     /// Stop compilation after the given stage.
-    /// since 0.8.11: only "parsing" is valid here
+    ///
+    /// Since 0.7.3. Only "parsing" is valid here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_after: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -272,16 +272,6 @@ pub struct Settings {
     /// If this key is an empty string, that refers to a global level.
     #[serde(default)]
     pub libraries: Libraries,
-    /// Specify EOF version to produce.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub eof_version: Option<EofVersion>,
-}
-
-/// Available EOF versions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
-pub enum EofVersion {
-    V1 = 1,
 }
 
 impl Settings {
@@ -306,6 +296,11 @@ impl Settings {
             }
             // introduced in <https://docs.soliditylang.org/en/v0.6.0/using-the-compiler.html#compiler-api>
             self.debug = None;
+        }
+
+        if *version < Version::new(0, 7, 3) {
+            // introduced in 0.7.3 <https://github.com/ethereum/solidity/releases/tag/v0.7.3>
+            self.stop_after = None;
         }
 
         if *version < Version::new(0, 7, 5) {
@@ -562,7 +557,6 @@ impl Default for Settings {
             libraries: Default::default(),
             remappings: Default::default(),
             model_checker: None,
-            eof_version: None,
         }
         .with_ast()
     }
@@ -793,7 +787,7 @@ impl YulDetails {
 
 /// EVM versions.
 ///
-/// Default is `Cancun`, since 0.8.25
+/// Default is `Prague`, since 0.8.30
 ///
 /// Kept in sync with: <https://github.com/ethereum/solidity/blob/develop/liblangutil/EVMVersion.h>
 // When adding new EVM versions (see a previous attempt at https://github.com/foundry-rs/compilers/pull/51):
@@ -816,8 +810,8 @@ pub enum EvmVersion {
     London,
     Paris,
     Shanghai,
-    #[default]
     Cancun,
+    #[default]
     Prague,
     Osaka,
 }
@@ -1453,7 +1447,7 @@ pub struct Item {
     #[serde(rename = "type")]
     pub put_type: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub components: Vec<Item>,
+    pub components: Vec<Self>,
     /// Indexed flag. for solidity events
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub indexed: Option<bool>,

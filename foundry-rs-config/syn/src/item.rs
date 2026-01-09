@@ -13,9 +13,11 @@ use crate::restriction::Visibility;
 use crate::stmt::Block;
 use crate::token;
 use crate::ty::{Abi, ReturnType, Type};
-use proc_macro2::TokenStream;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 #[cfg(feature = "parsing")]
-use std::mem;
+use core::mem;
+use proc_macro2::TokenStream;
 
 ast_enum_of_structs! {
     /// Things that can appear directly inside of a module or scope.
@@ -66,13 +68,13 @@ ast_enum_of_structs! {
         /// A trait alias: `pub trait SharableIterator = Iterator + Sync`.
         TraitAlias(ItemTraitAlias),
 
-        /// A type alias: `type Result<T> = std::result::Result<T, MyError>`.
+        /// A type alias: `type Result<T> = core::result::Result<T, MyError>`.
         Type(ItemType),
 
         /// A union definition: `union Foo<A, B> { x: A, y: B }`.
         Union(ItemUnion),
 
-        /// A use declaration: `use std::collections::HashMap`.
+        /// A use declaration: `use alloc::collections::HashMap`.
         Use(ItemUse),
 
         /// Tokens forming an item not interpreted by Syn.
@@ -277,7 +279,7 @@ ast_struct! {
 }
 
 ast_struct! {
-    /// A type alias: `type Result<T> = std::result::Result<T, MyError>`.
+    /// A type alias: `type Result<T> = core::result::Result<T, MyError>`.
     #[cfg_attr(docsrs, doc(cfg(feature = "full")))]
     pub struct ItemType {
         pub attrs: Vec<Attribute>,
@@ -305,7 +307,7 @@ ast_struct! {
 }
 
 ast_struct! {
-    /// A use declaration: `use std::collections::HashMap`.
+    /// A use declaration: `use alloc::collections::HashMap`.
     #[cfg_attr(docsrs, doc(cfg(feature = "full")))]
     pub struct ItemUse {
         pub attrs: Vec<Attribute>,
@@ -431,7 +433,7 @@ ast_enum_of_structs! {
     /// [syntax tree enum]: crate::expr::Expr#syntax-tree-enums
     #[cfg_attr(docsrs, doc(cfg(feature = "full")))]
     pub enum UseTree {
-        /// A path prefix of imports in a `use` item: `std::...`.
+        /// A path prefix of imports in a `use` item: `core::...`.
         Path(UsePath),
 
         /// An identifier imported by a `use` item: `HashMap`.
@@ -449,7 +451,7 @@ ast_enum_of_structs! {
 }
 
 ast_struct! {
-    /// A path prefix of imports in a `use` item: `std::...`.
+    /// A path prefix of imports in a `use` item: `core::...`.
     #[cfg_attr(docsrs, doc(cfg(feature = "full")))]
     pub struct UsePath {
         pub ident: Ident,
@@ -909,7 +911,7 @@ pub(crate) mod parsing {
     use crate::error::{Error, Result};
     use crate::expr::Expr;
     use crate::ext::IdentExt as _;
-    use crate::generics::{Generics, TypeParamBound};
+    use crate::generics::{self, Generics, TypeParamBound};
     use crate::ident::Ident;
     use crate::item::{
         FnArg, ForeignItem, ForeignItemFn, ForeignItemMacro, ForeignItemStatic, ForeignItemType,
@@ -932,6 +934,8 @@ pub(crate) mod parsing {
     use crate::token;
     use crate::ty::{Abi, ReturnType, Type, TypePath, TypeReference};
     use crate::verbatim;
+    use alloc::boxed::Box;
+    use alloc::vec::Vec;
     use proc_macro2::TokenStream;
 
     #[cfg_attr(docsrs, doc(cfg(feature = "parsing")))]
@@ -1208,12 +1212,8 @@ pub(crate) mod parsing {
                     }
                     bounds.push_value({
                         let allow_precise_capture = false;
-                        let allow_tilde_const = true;
-                        TypeParamBound::parse_single(
-                            input,
-                            allow_precise_capture,
-                            allow_tilde_const,
-                        )?
+                        let allow_const = true;
+                        TypeParamBound::parse_single(input, allow_precise_capture, allow_const)?
                     });
                     if input.peek(Token![where]) || input.peek(Token![=]) || input.peek(Token![;]) {
                         break;
@@ -1617,7 +1617,7 @@ pub(crate) mod parsing {
         // test/ui/rfc-2565-param-attrs/param-attrs-pretty.rs
         // because the rest of the test case is valuable.
         if input.peek(Ident) && input.peek2(Token![<]) {
-            let span = input.fork().parse::<Ident>()?.span();
+            let span = input.span();
             return Ok(FnArgOrVariadic::FnArg(FnArg::Typed(PatType {
                 attrs,
                 pat: Box::new(Pat::Wild(PatWild {
@@ -2233,8 +2233,8 @@ pub(crate) mod parsing {
                 }
                 supertraits.push_value({
                     let allow_precise_capture = false;
-                    let allow_tilde_const = true;
-                    TypeParamBound::parse_single(input, allow_precise_capture, allow_tilde_const)?
+                    let allow_const = true;
+                    TypeParamBound::parse_single(input, allow_precise_capture, allow_const)?
                 });
                 if input.peek(Token![where]) || input.peek(token::Brace) {
                     break;
@@ -2305,8 +2305,8 @@ pub(crate) mod parsing {
             }
             bounds.push_value({
                 let allow_precise_capture = false;
-                let allow_tilde_const = false;
-                TypeParamBound::parse_single(input, allow_precise_capture, allow_tilde_const)?
+                let allow_const = false;
+                TypeParamBound::parse_single(input, allow_precise_capture, allow_const)?
             });
             if input.peek(Token![where]) || input.peek(Token![;]) {
                 break;
@@ -2571,15 +2571,7 @@ pub(crate) mod parsing {
         let unsafety: Option<Token![unsafe]> = input.parse()?;
         let impl_token: Token![impl] = input.parse()?;
 
-        let has_generics = input.peek(Token![<])
-            && (input.peek2(Token![>])
-                || input.peek2(Token![#])
-                || (input.peek2(Ident) || input.peek2(Lifetime))
-                    && (input.peek3(Token![:])
-                        || input.peek3(Token![,])
-                        || input.peek3(Token![>])
-                        || input.peek3(Token![=]))
-                || input.peek2(Token![const]));
+        let has_generics = generics::parsing::choose_generics_over_qpath(input);
         let mut generics: Generics = if has_generics {
             input.parse()?
         } else {
@@ -2593,7 +2585,6 @@ pub(crate) mod parsing {
             input.parse::<Token![const]>()?;
         }
 
-        let begin = input.fork();
         let polarity = if input.peek(Token![!]) && !input.peek2(token::Brace) {
             Some(input.parse::<Token![!]>()?)
         } else {
@@ -2631,13 +2622,14 @@ pub(crate) mod parsing {
                 trait_ = None;
             }
             self_ty = input.parse()?;
+        } else if let Some(polarity) = polarity {
+            return Err(Error::new(
+                polarity.span,
+                "inherent impls cannot be negative",
+            ));
         } else {
             trait_ = None;
-            self_ty = if polarity.is_none() {
-                first_ty
-            } else {
-                Type::Verbatim(verbatim::between(&begin, input))
-            };
+            self_ty = first_ty;
         }
 
         generics.where_clause = input.parse()?;
@@ -2958,7 +2950,7 @@ mod printing {
     use crate::print::TokensOrDefault;
     use crate::ty::Type;
     use proc_macro2::TokenStream;
-    use quote::{ToTokens, TokenStreamExt};
+    use quote::{ToTokens, TokenStreamExt as _};
 
     #[cfg_attr(docsrs, doc(cfg(feature = "printing")))]
     impl ToTokens for ItemExternCrate {

@@ -1,5 +1,5 @@
 use crate::{parse_one_source, replace_source_content};
-use solar_sema::{
+use solar::parse::{
     ast::{self, Span},
     interface::diagnostics::EmittedDiagnostics,
 };
@@ -11,7 +11,7 @@ pub(crate) fn interface_repr_hash(content: &str, path: &Path) -> Option<String> 
 }
 
 pub(crate) fn interface_repr(content: &str, path: &Path) -> Result<String, EmittedDiagnostics> {
-    parse_one_source(content, path, |ast| interface_representation_ast(content, &ast))
+    parse_one_source(content, path, |sess, ast| interface_representation_ast(content, sess, ast))
 }
 
 /// Helper function to remove parts of the contract which do not alter its interface:
@@ -21,7 +21,8 @@ pub(crate) fn interface_repr(content: &str, path: &Path) -> Result<String, Emitt
 /// Preserves all libraries and interfaces.
 pub(crate) fn interface_representation_ast(
     content: &str,
-    ast: &solar_parse::ast::SourceUnit<'_>,
+    sess: &solar::sema::interface::Session,
+    ast: &solar::parse::ast::SourceUnit<'_>,
 ) -> String {
     let mut spans_to_remove: Vec<Span> = Vec::new();
     for item in ast.items.iter() {
@@ -38,7 +39,7 @@ pub(crate) fn interface_representation_ast(
                 let is_exposed = match function.kind {
                     // Function with external or public visibility
                     ast::FunctionKind::Function => {
-                        function.header.visibility >= Some(ast::Visibility::Public)
+                        function.header.visibility.map(|v| *v) >= Some(ast::Visibility::Public)
                     }
                     ast::FunctionKind::Constructor
                     | ast::FunctionKind::Fallback
@@ -57,9 +58,9 @@ pub(crate) fn interface_representation_ast(
             }
         }
     }
-    let content =
-        replace_source_content(content, spans_to_remove.iter().map(|span| (span.to_range(), "")))
-            .replace("\n", "");
+    let updates =
+        spans_to_remove.iter().map(|&span| (sess.source_map().span_to_range(span).unwrap(), ""));
+    let content = replace_source_content(content, updates).replace("\n", "");
     crate::utils::RE_TWO_OR_MORE_SPACES.replace_all(&content, "").into_owned()
 }
 

@@ -1,12 +1,12 @@
 use crate::{
+    InternalType,
     internal_type::BorrowedInternalType,
     utils::{mk_eparam, mk_param, validate_identifier},
-    InternalType,
 };
 use alloc::{borrow::Cow, string::String, vec::Vec};
 use core::{fmt, str::FromStr};
 use parser::{Error, ParameterSpecifier, TypeSpecifier};
-use serde::{de::Unexpected, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Unexpected};
 
 /// JSON specification of a parameter.
 ///
@@ -664,6 +664,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(all(feature = "std", feature = "serde_json"))]
     fn param_from_json() {
         let param = r#"{
             "internalType": "string",

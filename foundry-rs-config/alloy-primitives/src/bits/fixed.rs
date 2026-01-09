@@ -27,8 +27,11 @@ use hex::FromHex;
     IndexMut,
     IntoIterator,
 )]
-#[cfg_attr(feature = "arbitrary", derive(derive_arbitrary::Arbitrary, proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary, proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "allocative", derive(allocative::Allocative))]
+#[cfg_attr(feature = "diesel", derive(diesel::AsExpression, diesel::FromSqlRow))]
+#[cfg_attr(feature = "diesel", diesel(sql_type = diesel::sql_types::Binary))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 #[repr(transparent)]
 pub struct FixedBytes<const N: usize>(#[into_iterator(owned, ref, ref_mut)] pub [u8; N]);
 
@@ -249,21 +252,55 @@ impl<const N: usize> fmt::UpperHex for FixedBytes<N> {
     }
 }
 
+impl<const N: usize> ops::BitAndAssign for FixedBytes<N> {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self &= &rhs;
+    }
+}
+
+impl<const N: usize> ops::BitOrAssign for FixedBytes<N> {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self |= &rhs;
+    }
+}
+
+impl<const N: usize> ops::BitXorAssign for FixedBytes<N> {
+    #[inline]
+    fn bitxor_assign(&mut self, rhs: Self) {
+        *self ^= &rhs;
+    }
+}
+
+impl<const N: usize> ops::BitAndAssign<&Self> for FixedBytes<N> {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: &Self) {
+        iter::zip(self, rhs).for_each(|(a, b)| *a &= *b);
+    }
+}
+
+impl<const N: usize> ops::BitOrAssign<&Self> for FixedBytes<N> {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: &Self) {
+        iter::zip(self, rhs).for_each(|(a, b)| *a |= *b);
+    }
+}
+
+impl<const N: usize> ops::BitXorAssign<&Self> for FixedBytes<N> {
+    #[inline]
+    fn bitxor_assign(&mut self, rhs: &Self) {
+        iter::zip(self, rhs).for_each(|(a, b)| *a ^= *b);
+    }
+}
+
 impl<const N: usize> ops::BitAnd for FixedBytes<N> {
     type Output = Self;
 
     #[inline]
     fn bitand(mut self, rhs: Self) -> Self::Output {
-        self &= rhs;
+        self &= &rhs;
         self
-    }
-}
-
-impl<const N: usize> ops::BitAndAssign for FixedBytes<N> {
-    #[inline]
-    fn bitand_assign(&mut self, rhs: Self) {
-        // Note: `slice::Iter` has better codegen than `array::IntoIter`
-        iter::zip(self, &rhs).for_each(|(a, b)| *a &= *b);
     }
 }
 
@@ -272,16 +309,8 @@ impl<const N: usize> ops::BitOr for FixedBytes<N> {
 
     #[inline]
     fn bitor(mut self, rhs: Self) -> Self::Output {
-        self |= rhs;
+        self |= &rhs;
         self
-    }
-}
-
-impl<const N: usize> ops::BitOrAssign for FixedBytes<N> {
-    #[inline]
-    fn bitor_assign(&mut self, rhs: Self) {
-        // Note: `slice::Iter` has better codegen than `array::IntoIter`
-        iter::zip(self, &rhs).for_each(|(a, b)| *a |= *b);
     }
 }
 
@@ -290,16 +319,38 @@ impl<const N: usize> ops::BitXor for FixedBytes<N> {
 
     #[inline]
     fn bitxor(mut self, rhs: Self) -> Self::Output {
-        self ^= rhs;
+        self ^= &rhs;
         self
     }
 }
 
-impl<const N: usize> ops::BitXorAssign for FixedBytes<N> {
+impl<const N: usize> ops::BitAnd<&Self> for FixedBytes<N> {
+    type Output = Self;
+
     #[inline]
-    fn bitxor_assign(&mut self, rhs: Self) {
-        // Note: `slice::Iter` has better codegen than `array::IntoIter`
-        iter::zip(self, &rhs).for_each(|(a, b)| *a ^= *b);
+    fn bitand(mut self, rhs: &Self) -> Self::Output {
+        self &= rhs;
+        self
+    }
+}
+
+impl<const N: usize> ops::BitOr<&Self> for FixedBytes<N> {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(mut self, rhs: &Self) -> Self::Output {
+        self |= rhs;
+        self
+    }
+}
+
+impl<const N: usize> ops::BitXor<&Self> for FixedBytes<N> {
+    type Output = Self;
+
+    #[inline]
+    fn bitxor(mut self, rhs: &Self) -> Self::Output {
+        self ^= rhs;
+        self
     }
 }
 
@@ -323,9 +374,7 @@ impl<const N: usize> str::FromStr for FixedBytes<N> {
 }
 
 #[cfg(feature = "rand")]
-impl<const N: usize> rand::distributions::Distribution<FixedBytes<N>>
-    for rand::distributions::Standard
-{
+impl<const N: usize> rand::distr::Distribution<FixedBytes<N>> for rand::distr::StandardUniform {
     #[inline]
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> FixedBytes<N> {
         FixedBytes::random_with(rng)
@@ -372,9 +421,7 @@ impl<const N: usize> FixedBytes<N> {
     #[inline]
     #[track_caller]
     pub fn random() -> Self {
-        // SAFETY: `bytes` is only accessible after random initialization.
-        #[allow(clippy::uninit_assumed_init)]
-        let mut bytes = unsafe { core::mem::MaybeUninit::<Self>::uninit().assume_init() };
+        let mut bytes = Self::ZERO;
         bytes.randomize();
         bytes
     }
@@ -386,9 +433,7 @@ impl<const N: usize> FixedBytes<N> {
     #[cfg(feature = "getrandom")]
     #[inline]
     pub fn try_random() -> Result<Self, getrandom::Error> {
-        // SAFETY: `bytes` is only accessible after random initialization.
-        #[allow(clippy::uninit_assumed_init)]
-        let mut bytes = unsafe { core::mem::MaybeUninit::<Self>::uninit().assume_init() };
+        let mut bytes = Self::ZERO;
         bytes.try_randomize()?;
         Ok(bytes)
     }
@@ -400,11 +445,18 @@ impl<const N: usize> FixedBytes<N> {
     #[inline]
     #[doc(alias = "random_using")]
     pub fn random_with<R: rand::RngCore + ?Sized>(rng: &mut R) -> Self {
-        // SAFETY: `bytes` is only accessible after random initialization.
-        #[allow(clippy::uninit_assumed_init)]
-        let mut bytes = unsafe { core::mem::MaybeUninit::<Self>::uninit().assume_init() };
+        let mut bytes = Self::ZERO;
         bytes.randomize_with(rng);
         bytes
+    }
+
+    /// Tries to create a new [`FixedBytes`] with the given random number generator.
+    #[cfg(feature = "rand")]
+    #[inline]
+    pub fn try_random_with<R: rand::TryRngCore + ?Sized>(rng: &mut R) -> Result<Self, R::Error> {
+        let mut bytes = Self::ZERO;
+        bytes.try_randomize_with(rng)?;
+        Ok(bytes)
     }
 
     /// Fills this [`FixedBytes`] with the default cryptographic random number generator.
@@ -426,12 +478,12 @@ impl<const N: usize> FixedBytes<N> {
     pub fn try_randomize(&mut self) -> Result<(), getrandom::Error> {
         #[cfg(all(feature = "rand", feature = "std"))]
         {
-            self.randomize_with(&mut rand::thread_rng());
+            self.randomize_with(&mut rand::rng());
             Ok(())
         }
         #[cfg(not(all(feature = "rand", feature = "std")))]
         {
-            getrandom::getrandom(&mut self.0)
+            getrandom::fill(&mut self.0)
         }
     }
 
@@ -441,6 +493,16 @@ impl<const N: usize> FixedBytes<N> {
     #[doc(alias = "randomize_using")]
     pub fn randomize_with<R: rand::RngCore + ?Sized>(&mut self, rng: &mut R) {
         rng.fill_bytes(&mut self.0);
+    }
+
+    /// Tries to fill this [`FixedBytes`] with the given random number generator.
+    #[inline]
+    #[cfg(feature = "rand")]
+    pub fn try_randomize_with<R: rand::TryRngCore + ?Sized>(
+        &mut self,
+        rng: &mut R,
+    ) -> Result<(), R::Error> {
+        rng.try_fill_bytes(&mut self.0)
     }
 
     /// Concatenate two `FixedBytes`.
@@ -535,7 +597,7 @@ impl<const N: usize> FixedBytes<N> {
     /// Returns a mutable slice containing the entire array. Equivalent to
     /// `&mut s[..]`.
     #[inline]
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+    pub const fn as_mut_slice(&mut self) -> &mut [u8] {
         &mut self.0
     }
 

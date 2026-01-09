@@ -1,4 +1,4 @@
-use crate::{ParseSignedError, I256, U256};
+use crate::{I256, ParseSignedError, U256};
 use alloc::string::{String, ToString};
 use core::fmt;
 
@@ -10,8 +10,8 @@ const MAX_U64_EXPONENT: u8 = 19;
 ///
 /// ```
 /// use alloy_primitives::{
-///     utils::{parse_ether, Unit},
 ///     U256,
+///     utils::{Unit, parse_ether},
 /// };
 ///
 /// let eth = Unit::ETHER.wei();
@@ -26,23 +26,32 @@ pub fn parse_ether(eth: &str) -> Result<U256, UnitsError> {
 /// # Examples
 ///
 /// ```
-/// use alloy_primitives::{utils::parse_units, U256};
+/// use alloy_primitives::{U256, utils::parse_units};
 ///
 /// let amount_in_eth = U256::from_str_radix("15230001000000000000", 10).unwrap();
 /// let amount_in_gwei = U256::from_str_radix("15230001000", 10).unwrap();
 /// let amount_in_wei = U256::from_str_radix("15230001000", 10).unwrap();
-/// assert_eq!(amount_in_eth, parse_units("15.230001000000000000", "ether").unwrap().into());
-/// assert_eq!(amount_in_gwei, parse_units("15.230001000000000000", "gwei").unwrap().into());
-/// assert_eq!(amount_in_wei, parse_units("15230001000", "wei").unwrap().into());
+/// assert_eq!(
+///     amount_in_eth,
+///     <U256 as From<_>>::from(parse_units("15.230001000000000000", "ether").unwrap())
+/// );
+/// assert_eq!(
+///     amount_in_gwei,
+///     <U256 as From<_>>::from(parse_units("15.230001000000000000", "gwei").unwrap())
+/// );
+/// assert_eq!(amount_in_wei, <U256 as From<_>>::from(parse_units("15230001000", "wei").unwrap()));
 /// ```
 ///
 /// Example of trying to parse decimal WEI, which should fail, as WEI is the smallest
 /// ETH denominator. 1 ETH = 10^18 WEI.
 ///
 /// ```should_panic
-/// use alloy_primitives::{utils::parse_units, U256};
+/// use alloy_primitives::{U256, utils::parse_units};
 /// let amount_in_wei = U256::from_str_radix("15230001000", 10).unwrap();
-/// assert_eq!(amount_in_wei, parse_units("15.230001000000000000", "wei").unwrap().into());
+/// assert_eq!(
+///     amount_in_wei,
+///     <U256 as From<_>>::from(parse_units("15.230001000000000000", "wei").unwrap())
+/// );
 /// ```
 pub fn parse_units<K, E>(amount: &str, units: K) -> Result<ParseUnits, UnitsError>
 where
@@ -57,7 +66,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use alloy_primitives::{utils::format_ether, U256};
+/// use alloy_primitives::{U256, utils::format_ether};
 ///
 /// let eth = format_ether(1395633240123456000_u128);
 /// assert_eq!(format_ether(1395633240123456000_u128), "1.395633240123456000");
@@ -71,7 +80,7 @@ pub fn format_ether<T: Into<ParseUnits>>(amount: T) -> String {
 /// # Examples
 ///
 /// ```
-/// use alloy_primitives::{utils::format_units, U256};
+/// use alloy_primitives::{U256, utils::format_units};
 ///
 /// let eth = U256::from_str_radix("1395633240123456000", 10).unwrap();
 /// assert_eq!(format_units(eth, "eth").unwrap(), "1.395633240123456000");
@@ -87,6 +96,23 @@ where
     UnitsError: From<E>,
 {
     units.try_into().map(|units| amount.into().format_units(units)).map_err(UnitsError::from)
+}
+
+/// Formats the given number of Wei as the given unit with a custom decimal separator.
+pub fn format_units_with<T, K, E>(
+    amount: T,
+    units: K,
+    separator: DecimalSeparator,
+) -> Result<String, UnitsError>
+where
+    T: Into<ParseUnits>,
+    K: TryInto<Unit, Error = E>,
+    UnitsError: From<E>,
+{
+    units
+        .try_into()
+        .map(|units| amount.into().format_units_with(units, separator))
+        .map_err(UnitsError::from)
 }
 
 /// Error type for [`Unit`]-related operations.
@@ -188,6 +214,27 @@ macro_rules! impl_try_into_absolute {
 
 impl_try_into_absolute!(u64, u128);
 
+/// Decimal separator for number formatting
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum DecimalSeparator {
+    /// Use comma as decimal separator
+    Comma,
+    /// Use period as decimal separator
+    #[default]
+    Period,
+}
+
+impl DecimalSeparator {
+    /// Returns the character used as decimal separator
+    #[inline]
+    pub const fn separator(&self) -> char {
+        match self {
+            Self::Comma => ',',
+            Self::Period => '.',
+        }
+    }
+}
+
 impl ParseUnits {
     /// Parses a decimal number and multiplies it with 10^units.
     ///
@@ -243,9 +290,7 @@ impl ParseUnits {
     }
 
     /// Formats the given number of Wei as the given unit.
-    ///
-    /// See [`format_units`] for more information.
-    pub fn format_units(&self, mut unit: Unit) -> String {
+    pub fn format_units_with(&self, mut unit: Unit, separator: DecimalSeparator) -> String {
         // Edge case: If the number is signed and the unit is the largest possible unit, we need to
         //            subtract 1 from the unit to avoid overflow.
         if self.is_signed() && unit == Unit::MAX {
@@ -260,16 +305,23 @@ impl ParseUnits {
             Self::U256(amount) => {
                 let integer = amount / exp10;
                 let decimals = (amount % exp10).to_string();
-                format!("{integer}.{decimals:0>units$}")
+                format!("{integer}{}{decimals:0>units$}", separator.separator())
             }
             Self::I256(amount) => {
                 let exp10 = I256::from_raw(exp10);
                 let sign = if amount.is_negative() { "-" } else { "" };
                 let integer = (amount / exp10).twos_complement();
                 let decimals = ((amount % exp10).twos_complement()).to_string();
-                format!("{sign}{integer}.{decimals:0>units$}")
+                format!("{sign}{integer}{}{decimals:0>units$}", separator.separator())
             }
         }
+    }
+
+    /// Formats the given number of Wei as the given unit.
+    ///
+    /// See [`format_units`] for more information.
+    pub fn format_units(&self, unit: Unit) -> String {
+        self.format_units_with(unit, DecimalSeparator::Period)
     }
 
     /// Returns `true` if the number is signed.
@@ -396,52 +448,24 @@ impl core::str::FromStr for Unit {
 impl Unit {
     /// Wei is equivalent to 1 wei.
     pub const WEI: Self = unsafe { Self::new_unchecked(0) };
-    #[allow(non_upper_case_globals)]
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `Unit::WEI` instead")]
-    pub const Wei: Self = Self::WEI;
 
     /// Kwei is equivalent to 1e3 wei.
     pub const KWEI: Self = unsafe { Self::new_unchecked(3) };
-    #[allow(non_upper_case_globals)]
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `Unit::KWEI` instead")]
-    pub const Kwei: Self = Self::KWEI;
 
     /// Mwei is equivalent to 1e6 wei.
     pub const MWEI: Self = unsafe { Self::new_unchecked(6) };
-    #[allow(non_upper_case_globals)]
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `Unit::MWEI` instead")]
-    pub const Mwei: Self = Self::MWEI;
 
     /// Gwei is equivalent to 1e9 wei.
     pub const GWEI: Self = unsafe { Self::new_unchecked(9) };
-    #[allow(non_upper_case_globals)]
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `Unit::GWEI` instead")]
-    pub const Gwei: Self = Self::GWEI;
 
     /// Twei is equivalent to 1e12 wei.
     pub const TWEI: Self = unsafe { Self::new_unchecked(12) };
-    #[allow(non_upper_case_globals)]
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `Unit::TWEI` instead")]
-    pub const Twei: Self = Self::TWEI;
 
     /// Pwei is equivalent to 1e15 wei.
     pub const PWEI: Self = unsafe { Self::new_unchecked(15) };
-    #[allow(non_upper_case_globals)]
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `Unit::PWEI` instead")]
-    pub const Pwei: Self = Self::PWEI;
 
     /// Ether is equivalent to 1e18 wei.
     pub const ETHER: Self = unsafe { Self::new_unchecked(18) };
-    #[allow(non_upper_case_globals)]
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `Unit::ETHER` instead")]
-    pub const Ether: Self = Self::ETHER;
 
     /// The smallest unit.
     pub const MIN: Self = Self::WEI;
@@ -474,7 +498,7 @@ impl Unit {
     /// # Examples
     ///
     /// ```
-    /// use alloy_primitives::{utils::Unit, U256};
+    /// use alloy_primitives::{U256, utils::Unit};
     ///
     /// assert_eq!(U256::from(1u128), Unit::WEI.wei());
     /// assert_eq!(U256::from(1_000u128), Unit::KWEI.wei());
@@ -511,12 +535,6 @@ impl Unit {
     #[inline]
     pub const fn get(self) -> u8 {
         self.0
-    }
-
-    #[doc(hidden)]
-    #[deprecated(since = "0.5.0", note = "use `get` instead")]
-    pub const fn as_num(&self) -> u8 {
-        self.get()
     }
 }
 

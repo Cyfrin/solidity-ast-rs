@@ -1,7 +1,7 @@
-use super::{utils::*, ParseSignedError, Sign};
+use super::{ParseSignedError, Sign, utils::*};
 use alloc::string::String;
 use core::fmt;
-use ruint::{BaseConvertError, Uint};
+use ruint::{BaseConvertError, Uint, UintTryFrom, UintTryTo};
 
 /// Signed integer wrapping a `ruint::Uint`.
 ///
@@ -13,7 +13,7 @@ use ruint::{BaseConvertError, Uint};
 ///
 /// ## Aliases
 ///
-/// We provide aliases for every bit-width divisble by 8, from 8 to 256. These
+/// We provide aliases for every bit-width divisible by 8, from 8 to 256. These
 /// are located in [`crate::aliases`] and are named `I256`, `I248` etc. Most
 /// users will want [`crate::I256`].
 ///
@@ -51,7 +51,7 @@ use ruint::{BaseConvertError, Uint};
 /// assert_eq!(I256::MINUS_ONE, I256::unchecked_from(-1));
 /// ```
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(derive_arbitrary::Arbitrary, proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary, proptest_derive::Arbitrary))]
 pub struct Signed<const BITS: usize, const LIMBS: usize>(pub(crate) Uint<BITS, LIMBS>);
 
 // formatting
@@ -66,11 +66,7 @@ impl<const BITS: usize, const LIMBS: usize> fmt::Display for Signed<BITS, LIMBS>
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (sign, abs) = self.into_sign_and_abs();
         sign.fmt(f)?;
-        if f.sign_plus() {
-            write!(f, "{abs}")
-        } else {
-            abs.fmt(f)
-        }
+        if f.sign_plus() { write!(f, "{abs}") } else { abs.fmt(f) }
     }
 }
 
@@ -153,6 +149,39 @@ impl<const BITS: usize, const LIMBS: usize> Signed<BITS, LIMBS> {
         val.try_into().unwrap()
     }
 
+    /// Construct a new [`Signed`] from the value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the conversion fails, for example if the value is too large
+    /// for the bit-size of the [`Signed`]. The panic will be attributed to the
+    /// call site.
+    #[inline]
+    #[track_caller]
+    pub fn from<T>(value: T) -> Self
+    where
+        Self: UintTryFrom<T>,
+    {
+        match Self::uint_try_from(value) {
+            Ok(n) => n,
+            Err(e) => panic!("Uint conversion error: {e}"),
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the conversion fails, for example if the value is too large
+    /// for the bit-size of the target type.
+    #[inline]
+    #[track_caller]
+    pub fn to<T>(&self) -> T
+    where
+        Self: UintTryTo<T>,
+        T: fmt::Debug,
+    {
+        self.uint_try_to().expect("Uint conversion error")
+    }
+
     /// Shortcut for `self.try_into().unwrap()`.
     ///
     /// # Panics
@@ -193,11 +222,7 @@ impl<const BITS: usize, const LIMBS: usize> Signed<BITS, LIMBS> {
     /// Determines if the integer is odd.
     #[inline]
     pub const fn is_odd(&self) -> bool {
-        if BITS == 0 {
-            false
-        } else {
-            self.as_limbs()[0] % 2 == 1
-        }
+        if BITS == 0 { false } else { self.as_limbs()[0] % 2 == 1 }
     }
 
     /// Compile-time equality. NOT constant-time equality.
@@ -229,20 +254,20 @@ impl<const BITS: usize, const LIMBS: usize> Signed<BITS, LIMBS> {
 
     /// Returns the number of ones in the binary representation of `self`.
     #[inline]
-    pub fn count_ones(&self) -> usize {
+    pub const fn count_ones(&self) -> usize {
         self.0.count_ones()
     }
 
     /// Returns the number of zeros in the binary representation of `self`.
     #[inline]
-    pub fn count_zeros(&self) -> usize {
+    pub const fn count_zeros(&self) -> usize {
         self.0.count_zeros()
     }
 
     /// Returns the number of leading zeros in the binary representation of
     /// `self`.
     #[inline]
-    pub fn leading_zeros(&self) -> usize {
+    pub const fn leading_zeros(&self) -> usize {
         self.0.leading_zeros()
     }
 
@@ -327,11 +352,7 @@ impl<const BITS: usize, const LIMBS: usize> Signed<BITS, LIMBS> {
     #[inline]
     pub fn checked_from_sign_and_abs(sign: Sign, abs: Uint<BITS, LIMBS>) -> Option<Self> {
         let (result, overflow) = Self::overflowing_from_sign_and_abs(sign, abs);
-        if overflow {
-            None
-        } else {
-            Some(result)
-        }
+        if overflow { None } else { Some(result) }
     }
 
     /// Convert from a decimal string.
@@ -515,12 +536,12 @@ impl<const BITS: usize, const LIMBS: usize> Signed<BITS, LIMBS> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{aliases::*, BigIntConversionError, ParseSignedError};
+    use crate::{BigIntConversionError, ParseSignedError, aliases::*};
     use alloc::string::ToString;
     use core::ops::Neg;
     use ruint::{
-        aliases::{U0, U1, U128, U160, U256},
         BaseConvertError, ParseError,
+        aliases::{U0, U1, U128, U160, U256},
     };
 
     // type U2 = Uint<2, 1>;
@@ -1663,5 +1684,47 @@ mod tests {
         let a = Uint::<8, 1>::from(129u8);
         let (_, overflow) = Signed::overflowing_from_sign_and_abs(Sign::Negative, a);
         assert!(overflow);
+    }
+
+    #[test]
+    fn test_int_conversion() {
+        // can convert between signed of different sizes when value is within bounds
+        let m_i256 = I256::unchecked_from(-4);
+        let m_i24 = I24::from(m_i256);
+        assert_eq!(m_i24, I24::from_dec_str("-4").unwrap());
+        assert_eq!(m_i24.to::<I256>(), m_i256);
+        let m_i56 = I56::from(m_i24);
+        assert_eq!(m_i56, I56::from_dec_str("-4").unwrap());
+        assert_eq!(m_i56.to::<I24>(), m_i24);
+        let m_i128 = I128::from(m_i56);
+        assert_eq!(m_i128, I128::from_dec_str("-4").unwrap());
+        assert_eq!(m_i128.to::<I56>(), m_i56);
+        let m_i96 = I96::from(m_i128);
+        assert_eq!(m_i96, I96::from_dec_str("-4").unwrap());
+        assert_eq!(m_i96.to::<I128>(), m_i128);
+
+        // convert positive signed to unsigned
+        assert_eq!(U24::from(I24::from_hex_str("0x7FFFFF").unwrap()), U24::from(0x7FFFFF));
+        assert_eq!(I24::from_hex_str("0x7FFFFF").unwrap().to::<U24>(), U24::from(0x7FFFFF));
+
+        // convert unsigned to positive signed
+        assert_eq!(I24::from(U24::from(0x7FFFFF)), I24::from_hex_str("0x7FFFFF").unwrap());
+        assert_eq!(U24::from(0x7FFFFF).to::<I24>(), I24::from_hex_str("0x7FFFFF").unwrap());
+        assert_eq!(I24::from(U96::from(0x7FFFFF)), I24::from_hex_str("0x7FFFFF").unwrap());
+        assert_eq!(U96::from(0x7FFFFF).to::<I24>(), I24::from_hex_str("0x7FFFFF").unwrap());
+
+        // can't convert negative signed to unsigned
+        assert!(U24::uint_try_from(m_i24).is_err());
+        assert!(<I24 as UintTryTo<U24>>::uint_try_to(&m_i24).is_err());
+
+        // can't convert unsigned to positive signed if too large
+        assert!(I24::uint_try_from(U24::from(0x800000)).is_err());
+        assert!(<U24 as UintTryTo<I24>>::uint_try_to(&U24::from(0x800000)).is_err());
+
+        // out-of-bounds conversions
+        assert!(I24::uint_try_from(I128::MIN).is_err());
+        assert!(<I128 as UintTryTo<I24>>::uint_try_to(&I128::MIN).is_err());
+        assert!(I24::uint_try_from(I128::MAX).is_err());
+        assert!(<I128 as UintTryTo<I24>>::uint_try_to(&I128::MAX).is_err());
     }
 }

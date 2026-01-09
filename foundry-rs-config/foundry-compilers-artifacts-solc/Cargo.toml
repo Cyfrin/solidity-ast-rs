@@ -11,9 +11,9 @@
 
 [package]
 edition = "2021"
-rust-version = "1.83"
+rust-version = "1.88"
 name = "foundry-compilers-artifacts-solc"
-version = "0.14.1"
+version = "0.19.10"
 authors = ["Foundry Maintainers"]
 build = false
 exclude = [
@@ -40,7 +40,7 @@ async = [
 checksum = ["foundry-compilers-core/hasher"]
 rayon = ["dep:rayon"]
 walkdir = [
-    "dep:walkdir",
+    "rayon",
     "foundry-compilers-core/walkdir",
 ]
 
@@ -49,26 +49,32 @@ name = "foundry_compilers_artifacts_solc"
 path = "src/lib.rs"
 
 [dependencies.alloy-json-abi]
-version = "0.8"
+version = "1.3"
 features = ["serde_json"]
 
 [dependencies.alloy-primitives]
-version = "0.8"
+version = "1.3"
 features = [
     "serde",
     "rand",
 ]
 
 [dependencies.foundry-compilers-core]
-version = "0.14.1"
+version = "0.19.10"
 
 [dependencies.futures-util]
 version = "0.3"
 optional = true
 
+[dependencies.memchr]
+version = "2.7"
+
 [dependencies.rayon]
-version = "1.8"
+version = "1.11"
 optional = true
+
+[dependencies.regex]
+version = "1.11"
 
 [dependencies.semver]
 version = "1.0"
@@ -84,14 +90,11 @@ features = [
 [dependencies.serde_json]
 version = "1.0"
 
-[dependencies.serde_repr]
-version = "0.1"
-
 [dependencies.thiserror]
 version = "2"
 
 [dependencies.tokio]
-version = "1.35"
+version = "1.47"
 features = [
     "rt-multi-thread",
     "fs",
@@ -101,15 +104,11 @@ optional = true
 [dependencies.tracing]
 version = "0.1"
 
-[dependencies.walkdir]
-version = "2.5"
-optional = true
-
 [dependencies.yansi]
 version = "1.0"
 
 [dev-dependencies.foundry-compilers-core]
-version = "0.14.1"
+version = "0.19.10"
 features = ["test-utils"]
 
 [dev-dependencies.serde_path_to_error]

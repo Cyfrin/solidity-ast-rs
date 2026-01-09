@@ -2,7 +2,7 @@
 //!
 //! Adapted from <https://github.com/paritytech/parity-common/blob/2fb72eea96b6de4a085144ce239feb49da0cd39e/ethbloom/src/lib.rs>
 
-use crate::{keccak256, Address, Log, LogData, B256};
+use crate::{Address, B256, Log, LogData, keccak256};
 
 /// Number of bits to set per input in Ethereum bloom filter.
 pub const BLOOM_BITS_PER_ITEM: usize = 3;
@@ -51,6 +51,8 @@ impl From<BloomInput<'_>> for Bloom {
 
 wrap_fixed_bytes!(
     /// Ethereum 256 byte bloom filter.
+    #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+    #[cfg_attr(feature = "rkyv", rkyv(derive(Copy, Clone, Hash, PartialEq, Eq)))]
     pub struct Bloom<256>;
 );
 
@@ -110,13 +112,13 @@ impl Bloom {
     /// Returns a reference to the underlying data.
     #[inline]
     pub const fn data(&self) -> &[u8; BLOOM_SIZE_BYTES] {
-        &self.0 .0
+        &self.0.0
     }
 
     /// Returns a mutable reference to the underlying data.
     #[inline]
-    pub fn data_mut(&mut self) -> &mut [u8; BLOOM_SIZE_BYTES] {
-        &mut self.0 .0
+    pub const fn data_mut(&mut self) -> &mut [u8; BLOOM_SIZE_BYTES] {
+        &mut self.0.0
     }
 
     /// Returns true if this bloom filter is a possible superset of the other
@@ -198,6 +200,13 @@ impl Bloom {
     /// Ingests a log into the bloom filter.
     pub fn accrue_log(&mut self, log: &Log) {
         self.accrue_raw_log(log.address, log.topics())
+    }
+
+    /// Ingests multiple logs into the bloom filter.
+    pub fn accrue_logs(&mut self, logs: &[Log]) {
+        for log in logs {
+            self.accrue_log(log)
+        }
     }
 
     /// True if the bloom filter contains a log with given address and topics.

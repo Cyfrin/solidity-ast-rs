@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.85"
 name = "alloy-sol-type-parser"
-version = "0.8.22"
+version = "1.5.2"
 authors = ["Alloy Contributors"]
 build = false
 exclude = ["tests"]
@@ -38,6 +38,7 @@ categories = [
 ]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alloy-rs/core"
+resolver = "2"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -50,6 +51,7 @@ rustdoc-args = [
 [features]
 debug = ["std"]
 default = ["std"]
+eip712 = []
 serde = ["dep:serde"]
 std = ["winnow/std"]
 
@@ -79,7 +81,7 @@ default-features = false
 [lints.clippy]
 dbg-macro = "warn"
 manual-string-new = "warn"
-missing-const-for-fn = "allow"
+missing-const-for-fn = "warn"
 redundant-clone = "warn"
 uninlined-format-args = "warn"
 use-self = "warn"

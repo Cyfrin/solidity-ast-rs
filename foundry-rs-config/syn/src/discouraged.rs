@@ -3,11 +3,11 @@
 use crate::buffer::Cursor;
 use crate::error::Result;
 use crate::parse::{inner_unexpected, ParseBuffer, Unexpected};
+use alloc::rc::Rc;
+use core::cell::Cell;
+use core::mem;
 use proc_macro2::extra::DelimSpan;
 use proc_macro2::Delimiter;
-use std::cell::Cell;
-use std::mem;
-use std::rc::Rc;
 
 /// Extensions to the `ParseStream` API to support speculative parsing.
 pub trait Speculative {
@@ -183,9 +183,9 @@ impl<'a> Speculative for ParseBuffer<'a> {
                     fork_unexp.set(Unexpected::Chain(self_unexp));
 
                     // Ensure toplevel 'unexpected' tokens from the fork don't
-                    // bubble up the chain by replacing the root `unexpected`
+                    // propagate up the chain by replacing the root `unexpected`
                     // pointer, only 'unexpected' tokens from existing group
-                    // parsers should bubble.
+                    // parsers should propagate.
                     fork.unexpected
                         .set(Some(Rc::new(Cell::new(Unexpected::None))));
                 }

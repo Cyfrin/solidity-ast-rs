@@ -9,7 +9,7 @@
 
 use num_bigint::BigUint;
 use proc_macro::TokenStream;
-use syn::{Expr, Item, ItemFn, Lit};
+use syn::{Expr, ExprLit, Item, ItemFn, Lit, Meta};
 
 mod montgomery;
 mod unroll;
@@ -106,31 +106,73 @@ pub fn unroll_for_loops(args: TokenStream, input: TokenStream) -> TokenStream {
 
 /// Fetch an attribute string from the derived struct.
 fn fetch_attr(name: &str, attrs: &[syn::Attribute]) -> Option<String> {
+    // Go over each attribute
     for attr in attrs {
-        if let Ok(meta) = attr.parse_meta() {
-            match meta {
-                syn::Meta::NameValue(nv) => {
-                    if nv.path.get_ident().map(|i| i.to_string()) == Some(name.to_string()) {
-                        match nv.lit {
-                            syn::Lit::Str(ref s) => return Some(s.value()),
-                            _ => {
-                                panic!("attribute {} should be a string", name);
-                            },
-                        }
-                    }
-                },
-                _ => {
-                    panic!("attribute {} should be a string", name);
-                },
-            }
+        match attr.meta {
+            // If the attribute's path matches `name`, and if the attribute is of
+            // the form `#[name = "value"]`, return `value`
+            Meta::NameValue(ref nv) if nv.path.is_ident(name) => {
+                // Extract and return the string value.
+                // If `value` is not a string, return an error
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Str(ref s),
+                    ..
+                }) = nv.value
+                {
+                    return Some(s.value());
+                } else {
+                    panic!("attribute {name} should be a string")
+                }
+            },
+            _ => continue,
         }
     }
-
     None
 }
 
 #[test]
 fn test_str_to_limbs() {
+    use num_bigint::Sign::*;
+    for i in 0..100 {
+        for sign in [Plus, Minus] {
+            let number = 1i128 << i;
+            let signed_number = match sign {
+                Minus => -number,
+                Plus | _ => number,
+            };
+            for base in [2, 8, 16, 10] {
+                let mut string = match base {
+                    2 => format!("{:#b}", number),
+                    8 => format!("{:#o}", number),
+                    16 => format!("{:#x}", number),
+                    10 => format!("{}", number),
+                    _ => unreachable!(),
+                };
+                if sign == Minus {
+                    string.insert(0, '-');
+                }
+                let (is_positive, limbs) = utils::str_to_limbs(&format!("{}", string));
+                assert_eq!(
+                    limbs[0],
+                    format!("{}u64", signed_number.abs() as u64),
+                    "{signed_number}, {i}"
+                );
+                if i > 63 {
+                    assert_eq!(
+                        limbs[1],
+                        format!("{}u64", (signed_number.abs() >> 64) as u64),
+                        "{signed_number}, {i}"
+                    );
+                }
+
+                assert_eq!(is_positive, sign == Plus);
+            }
+        }
+    }
+    let (is_positive, limbs) = utils::str_to_limbs("0");
+    assert!(is_positive);
+    assert_eq!(&limbs, &["0u64".to_string()]);
+
     let (is_positive, limbs) = utils::str_to_limbs("-5");
     assert!(!is_positive);
     assert_eq!(&limbs, &["5u64".to_string()]);

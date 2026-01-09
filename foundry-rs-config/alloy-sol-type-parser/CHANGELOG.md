@@ -5,6 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1](https://github.com/alloy-rs/core/releases/tag/v1.5.1) - 2025-12-18
+
+### Miscellaneous Tasks
+
+- Release 1.5.1
+
+## [1.5.0](https://github.com/alloy-rs/core/releases/tag/v1.5.0) - 2025-12-16
+
+### Miscellaneous Tasks
+
+- Release 1.5.0
+
+## [1.4.1](https://github.com/alloy-rs/core/releases/tag/v1.4.1) - 2025-10-14
+
+### Miscellaneous Tasks
+
+- Release 1.4.1
+- Remove some inlines ([#1028](https://github.com/alloy-rs/core/issues/1028))
+- Remove feature(doc_auto_cfg) ([#1019](https://github.com/alloy-rs/core/issues/1019))
+
+## [1.4.0](https://github.com/alloy-rs/core/releases/tag/v1.4.0) - 2025-09-26
+
+### Miscellaneous Tasks
+
+- Release 1.4.0
+
+## [1.3.1](https://github.com/alloy-rs/core/releases/tag/v1.3.1) - 2025-08-17
+
+### Miscellaneous Tasks
+
+- Release 1.3.1
+
+## [1.3.0](https://github.com/alloy-rs/core/releases/tag/v1.3.0) - 2025-07-22
+
+### Miscellaneous Tasks
+
+- Release 1.3.0
+
+## [1.2.1](https://github.com/alloy-rs/core/releases/tag/v1.2.1) - 2025-06-20
+
+### Bug Fixes
+
+- Colon 712 identifiers ([#963](https://github.com/alloy-rs/core/issues/963))
+
+### Miscellaneous Tasks
+
+- Release 1.2.1
+- Re-enable clippy::missing-const-for-fn ([#961](https://github.com/alloy-rs/core/issues/961))
+
+## [1.2.0](https://github.com/alloy-rs/core/releases/tag/v1.2.0) - 2025-06-04
+
+### Dependencies
+
+- Bump to edition 2024 ([#960](https://github.com/alloy-rs/core/issues/960))
+
+### Miscellaneous Tasks
+
+- Release 1.2.0
+
+## [1.1.3](https://github.com/alloy-rs/core/releases/tag/v1.1.3) - 2025-06-04
+
+### Miscellaneous Tasks
+
+- Release 1.1.3
+
+## [1.1.2](https://github.com/alloy-rs/core/releases/tag/v1.1.2) - 2025-05-20
+
+### Miscellaneous Tasks
+
+- Release 1.1.2
+
+## [1.1.1](https://github.com/alloy-rs/core/releases/tag/v1.1.1) - 2025-05-19
+
+### Miscellaneous Tasks
+
+- Release 1.1.1
+
+## [1.1.0](https://github.com/alloy-rs/core/releases/tag/v1.1.0) - 2025-04-30
+
+### Miscellaneous Tasks
+
+- Release 1.1.0
+
+## [1.0.0](https://github.com/alloy-rs/core/releases/tag/v1.0.0) - 2025-04-03
+
+### Miscellaneous Tasks
+
+- Release 1.0.0
+- Release 1.0.0-rc.1
+- Release 0.8.25
+
+### Other
+
+- Merge branch 'main' into v1.0-rc
+
+## [0.8.24](https://github.com/alloy-rs/core/releases/tag/v0.8.24) - 2025-03-21
+
+### Miscellaneous Tasks
+
+- Release 0.8.24
+
+## [0.8.23](https://github.com/alloy-rs/core/releases/tag/v0.8.23) - 2025-03-13
+
+### Miscellaneous Tasks
+
+- Release 0.8.23
+
+## [0.8.22](https://github.com/alloy-rs/core/releases/tag/v0.8.22) - 2025-02-27
+
+### Miscellaneous Tasks
+
+- Release 0.8.22
+
 ## [0.8.21](https://github.com/alloy-rs/core/releases/tag/v0.8.21) - 2025-02-10
 
 ### Miscellaneous Tasks

@@ -11,16 +11,16 @@
 
 [package]
 edition = "2021"
-rust-version = "1.73.0"
+rust-version = "1.82.0"
 name = "zip"
-version = "2.6.1"
+version = "4.6.1"
 authors = [
     "Mathijs van de Nes <git@mathijs.vd-nes.nl>",
     "Marli Frost <marli@frost.red>",
     "Ryan Levick <ryan.levick@gmail.com>",
     "Chris Hennick <hennickc@amazon.com>",
 ]
-build = "src/build.rs"
+build = false
 exclude = [
     "tests/**",
     "examples/**",
@@ -56,52 +56,60 @@ rustdoc-args = [
 _all-features = []
 _deflate-any = []
 aes-crypto = [
-    "aes",
-    "constant_time_eq",
+    "dep:aes",
+    "dep:constant_time_eq",
     "hmac",
     "pbkdf2",
     "sha1",
     "getrandom",
     "zeroize",
 ]
-chrono = ["chrono/default"]
+chrono = ["dep:chrono"]
 default = [
     "aes-crypto",
     "bzip2",
     "deflate64",
     "deflate",
-    "lzma",
+    "lzma-static",
+    "ppmd",
     "time",
     "zstd",
     "xz",
 ]
 deflate = [
-    "flate2/rust_backend",
     "deflate-zopfli",
-    "deflate-flate2",
+    "deflate-flate2-zlib-rs",
 ]
-deflate-flate2 = ["_deflate-any"]
-deflate-miniz = [
-    "deflate",
-    "deflate-flate2",
+deflate-flate2 = [
+    "_deflate-any",
+    "dep:flate2",
 ]
-deflate-zlib = [
+deflate-flate2-zlib = [
+    "deflate-flate2",
     "flate2/zlib",
-    "deflate-flate2",
 ]
-deflate-zlib-ng = [
-    "flate2/zlib-ng",
+deflate-flate2-zlib-rs = [
     "deflate-flate2",
+    "flate2/zlib-rs",
 ]
 deflate-zopfli = [
-    "zopfli",
+    "dep:zopfli",
     "_deflate-any",
 ]
 jiff-02 = ["dep:jiff"]
-lzma = ["lzma-rs/stream"]
+lzma = ["dep:liblzma"]
+lzma-static = [
+    "lzma",
+    "liblzma/static",
+]
 nt-time = ["dep:nt-time"]
+ppmd = ["dep:ppmd-rust"]
 unreserved = []
-xz = ["dep:xz2"]
+xz = ["dep:liblzma"]
+xz-static = [
+    "xz",
+    "liblzma/static",
+]
 
 [lib]
 name = "zip"
@@ -127,7 +135,7 @@ version = "0.8"
 optional = true
 
 [dependencies.bzip2]
-version = "0.5.0"
+version = "0.6.0"
 optional = true
 
 [dependencies.chrono]
@@ -135,7 +143,7 @@ version = "0.4"
 optional = true
 
 [dependencies.constant_time_eq]
-version = "0.3"
+version = "0.3.1"
 optional = true
 
 [dependencies.crc32fast]
@@ -146,16 +154,13 @@ version = "0.1.9"
 optional = true
 
 [dependencies.flate2]
-version = "1.0"
+version = "1.1.1"
 optional = true
 default-features = false
 
 [dependencies.getrandom]
 version = "0.3.1"
-features = [
-    "wasm_js",
-    "std",
-]
+features = ["std"]
 optional = true
 
 [dependencies.hmac]
@@ -170,10 +175,9 @@ version = "2"
 version = "0.2.4"
 optional = true
 
-[dependencies.lzma-rs]
-version = "0.3"
+[dependencies.liblzma]
+version = "0.4.1"
 optional = true
-default-features = false
 
 [dependencies.memchr]
 version = "2.7"
@@ -187,8 +191,8 @@ default-features = false
 version = "0.12"
 optional = true
 
-[dependencies.proc-macro2]
-version = ">=1.0.60"
+[dependencies.ppmd-rust]
+version = "1.2"
 optional = true
 
 [dependencies.sha1]
@@ -200,10 +204,6 @@ version = "0.3.37"
 features = ["std"]
 optional = true
 default-features = false
-
-[dependencies.xz2]
-version = "0.1.7"
-optional = true
 
 [dependencies.zeroize]
 version = "1.8"
@@ -249,9 +249,6 @@ default-features = false
 
 [dev-dependencies.walkdir]
 version = "2.5"
-
-[target.'cfg(any(all(target_arch = "arm", target_pointer_width = "32"), target_arch = "mips", target_arch = "powerpc"))'.dependencies.crossbeam-utils]
-version = "0.8.21"
 
 [target."cfg(fuzzing)".dependencies.arbitrary]
 version = "1.4.1"

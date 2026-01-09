@@ -1,7 +1,7 @@
 #![cfg(feature = "std")]
 
 use crate::Uint;
-use core::cmp::{min, Ordering};
+use core::cmp::{Ordering, min};
 
 impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     /// Computes the floor of the `degree`-th root of the number.
@@ -37,7 +37,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
 
         // Handle case where `degree > Self::BITS`.
         if degree >= Self::BITS {
-            return Self::from(1);
+            return Self::ONE;
         }
 
         // Handle case where `degree == 1`.
@@ -99,7 +99,7 @@ mod tests {
     #[test]
     #[allow(clippy::absurd_extreme_comparisons)] // From macro.
     fn test_root() {
-        const_for!(BITS in SIZES if (BITS > 3) {
+        const_for!(BITS in SIZES if BITS > 3 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(value: U, degree in 1_usize..=5)| {
@@ -107,7 +107,7 @@ mod tests {
                 let lower = root.pow(U::from(degree));
                 assert!(value >= lower);
                 let upper = root
-                    .checked_add(U::from(1))
+                    .checked_add(U::ONE)
                     .and_then(|n| n.checked_pow(U::from(degree)));
                 if let Some(upper) = upper {
                    assert!(value < upper);
@@ -120,7 +120,7 @@ mod tests {
     #[allow(clippy::absurd_extreme_comparisons)] // From macro.
     #[allow(clippy::reversed_empty_ranges)] // From macro.
     fn test_root_large() {
-        const_for!(BITS in SIZES if (BITS > 3) {
+        const_for!(BITS in SIZES if BITS > 3 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(value: U, degree in 1_usize..=BITS)| {
@@ -128,7 +128,7 @@ mod tests {
                 let lower = root.pow(U::from(degree));
                 assert!(value >= lower);
                 let upper = root
-                    .checked_add(U::from(1))
+                    .checked_add(U::ONE)
                     .and_then(|n| n.checked_pow(U::from(degree)));
                 if let Some(upper) = upper {
                    assert!(value < upper);

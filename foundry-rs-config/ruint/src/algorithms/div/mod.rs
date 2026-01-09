@@ -20,18 +20,19 @@ mod small;
 
 pub use self::{
     knuth::{div_nxm, div_nxm_normalized},
-    reciprocal::{reciprocal, reciprocal_2, reciprocal_2_mg10, reciprocal_mg10, reciprocal_ref},
+    reciprocal::{
+        checked_reciprocal, checked_reciprocal_2, reciprocal, reciprocal_2, reciprocal_2_mg10,
+        reciprocal_mg10, reciprocal_ref,
+    },
     small::{
-        div_2x1, div_2x1_mg10, div_2x1_ref, div_3x2, div_3x2_mg10, div_3x2_ref, div_nx1,
+        div_1x1, div_2x1, div_2x1_mg10, div_2x1_ref, div_3x2, div_3x2_mg10, div_3x2_ref, div_nx1,
         div_nx1_normalized, div_nx2, div_nx2_normalized,
     },
 };
-use crate::algorithms::DoubleWord;
+use crate::{algorithms::DoubleWord, utils::cold_path};
 
 /// ⚠️ Division with remainder.
-///
-/// **Warning.** This function is not part of the stable API.
-///
+#[doc = crate::algorithms::unstable_warning!()]
 /// The quotient is stored in the `numerator` and the remainder is stored
 /// in the `divisor`.
 ///
@@ -45,29 +46,43 @@ use crate::algorithms::DoubleWord;
 ///
 /// Panics if `divisor` is zero.
 #[inline]
+#[cfg_attr(debug_assertions, track_caller)]
 pub fn div(numerator: &mut [u64], divisor: &mut [u64]) {
-    // Trim most significant zeros from divisor.
-    let i = divisor
-        .iter()
-        .rposition(|&x| x != 0)
-        .expect("Divisor is zero");
-    let divisor = &mut divisor[..=i];
-    debug_assert!(!divisor.is_empty());
-    debug_assert!(divisor.last() != Some(&0));
+    div_inlined(numerator, divisor);
+}
 
-    // Trim zeros from numerator
-    let numerator = if let Some(i) = numerator.iter().rposition(|&n| n != 0) {
-        &mut numerator[..=i]
-    } else {
-        // Empty numerator (q, r) = (0,0)
+/// Separate definition of [`div`] to force inlining.
+///
+/// We want to inline this function where statically we know the size of the
+/// parameters to allow for more optimizations.
+#[inline(always)]
+#[cfg_attr(debug_assertions, track_caller)]
+pub(crate) fn div_inlined(numerator: &mut [u64], divisor: &mut [u64]) {
+    // Trim most significant zeros from divisor.
+    let divisor = super::trim_end_zeros_mut(divisor);
+    if divisor.is_empty() {
+        // Force a division by 0 panic, which is smaller in code size than an `assert!`.
+        #[allow(unconditional_panic, clippy::all)]
+        let _ = 0 / 0;
+    }
+    debug_assert_ne!(*divisor.last().unwrap(), 0);
+
+    // Trim most significant zeros from numerator.
+    let numerator = super::trim_end_zeros_mut(numerator);
+    if numerator.is_empty() {
+        // Empty numerator: (q, r) = (0, 0)
+        cold_path();
         divisor.fill(0);
         return;
-    };
-    debug_assert!(!numerator.is_empty());
-    debug_assert!(*numerator.last().unwrap() != 0);
+    }
+    debug_assert_ne!(*numerator.last().unwrap(), 0);
 
-    // If numerator is smaller than divisor (q, r) = (0, numerator)
-    if numerator.len() < divisor.len() {
+    if super::cmp(numerator, divisor).is_lt() {
+        // Numerator is smaller than the divisor: (q, r) = (0, numerator)
+        cold_path();
+        // `a < b` implies `a.len() <= b.len()`,
+        // after trimming most significant zeros.
+        assume!(numerator.len() <= divisor.len());
         let (remainder, padding) = divisor.split_at_mut(numerator.len());
         remainder.copy_from_slice(numerator);
         padding.fill(0);
@@ -77,24 +92,45 @@ pub fn div(numerator: &mut [u64], divisor: &mut [u64]) {
     debug_assert!(numerator.len() >= divisor.len());
 
     // Compute quotient and remainder, branching out to different algorithms.
-    if divisor.len() <= 2 {
-        if divisor.len() == 1 {
-            if numerator.len() == 1 {
-                let q = numerator[0] / divisor[0];
-                let r = numerator[0] % divisor[0];
-                numerator[0] = q;
-                divisor[0] = r;
+    //
+    // SAFETY:
+    //
+    // All match arms ensure the COU of their respective called functions.
+    //
+    // `div_nx1`, `div_nx2` have identical COUs:
+    // 1. High limb of numerator is nonzero
+    //   - Ensured by trimming zeros above
+    // 2. High limb of divisor is nonzero
+    //   - Ensured by trimming zeros above
+    //
+    // `div_nx2` has the following additional COU:
+    // 3. Divisor is in the range $[2^{64}, 2^{128})$.
+    //  - Ensured by trimming zeros above and match guard below.
+    //
+    // `div_nxm` has the following COUs:
+    // 1. numerator is at least three limbs.
+    //   - Ensured by combination of COU2 and COU4.
+    // 2. divisor is at least three limbs.
+    //  - Ensured by match guard below.
+    // 3. highest limb of divisor is non-zero.
+    //   - Ensured by trimming zeros above.
+    // 4. numerator has at least as many limbs as divisor.
+    //   - Ensured by `if super::cmp` above.
+    match divisor {
+        [divisor] => {
+            let d = *divisor;
+            if let [numerator] = numerator {
+                assume!(d != 0); // Elides division by 0 check.
+                (*numerator, *divisor) = div_1x1(*numerator, d);
             } else {
-                divisor[0] = div_nx1(numerator, divisor[0]);
+                *divisor = unsafe { div_nx1(numerator, d) };
             }
-        } else {
-            let d = u128::join(divisor[1], divisor[0]);
-            let remainder = div_nx2(numerator, d);
-            divisor[0] = remainder.low();
-            divisor[1] = remainder.high();
         }
-    } else {
-        div_nxm(numerator, divisor);
+        [d0, d1] => {
+            let d = u128::join(*d1, *d0);
+            (*d0, *d1) = unsafe { div_nx2(numerator, d) }.split();
+        }
+        _ => unsafe { div_nxm(numerator, divisor) },
     }
 }
 

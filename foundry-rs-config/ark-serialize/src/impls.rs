@@ -1,15 +1,17 @@
+use crate::{
+    CanonicalDeserialize, CanonicalSerialize, Compress, SerializationError, Valid, Validate,
+};
 use ark_std::{
-    borrow::Cow,
-    collections::{BTreeMap, BTreeSet},
+    borrow::*,
+    collections::{BTreeMap, BTreeSet, LinkedList, VecDeque},
     io::{Read, Write},
     marker::PhantomData,
     rc::Rc,
-    string::String,
-    vec::Vec,
+    string::*,
+    vec::*,
 };
+use arrayvec::ArrayVec;
 use num_bigint::BigUint;
-
-use crate::*;
 
 impl Valid for bool {
     fn check(&self) -> Result<(), SerializationError> {
@@ -305,7 +307,7 @@ impl<T: CanonicalSerialize + ToOwned> CanonicalSerialize for Rc<T> {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(target_has_atomic = "ptr")]
 impl<T: CanonicalSerialize + ToOwned> CanonicalSerialize for ark_std::sync::Arc<T> {
     #[inline]
     fn serialize_with_mode<W: Write>(
@@ -322,7 +324,7 @@ impl<T: CanonicalSerialize + ToOwned> CanonicalSerialize for ark_std::sync::Arc<
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(target_has_atomic = "ptr")]
 impl<T: Valid + Sync + Send> Valid for ark_std::sync::Arc<T> {
     #[inline]
     fn check(&self) -> Result<(), SerializationError> {
@@ -341,7 +343,7 @@ impl<T: Valid + Sync + Send> Valid for ark_std::sync::Arc<T> {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(target_has_atomic = "ptr")]
 impl<T: CanonicalDeserialize + ToOwned + Sync + Send> CanonicalDeserialize
     for ark_std::sync::Arc<T>
 {
@@ -457,13 +459,18 @@ impl<T: CanonicalDeserialize, const N: usize> CanonicalDeserialize for [T; N] {
         compress: Compress,
         validate: Validate,
     ) -> Result<Self, SerializationError> {
-        let result = core::array::from_fn(|_| {
-            T::deserialize_with_mode(&mut reader, compress, Validate::No).unwrap()
-        });
-        if let Validate::Yes = validate {
-            T::batch_check(result.iter())?
+        let mut array = ArrayVec::<T, N>::new();
+        for _ in 0..N {
+            array.push(T::deserialize_with_mode(
+                &mut reader,
+                compress,
+                Validate::No,
+            )?);
         }
-        Ok(result)
+        if let Validate::Yes = validate {
+            T::batch_check(array.iter())?
+        }
+        Ok(array.into_inner().ok().unwrap())
     }
 }
 
@@ -507,10 +514,171 @@ impl<T: CanonicalDeserialize> CanonicalDeserialize for Vec<T> {
         compress: Compress,
         validate: Validate,
     ) -> Result<Self, SerializationError> {
-        let len = u64::deserialize_with_mode(&mut reader, compress, validate)?;
-        let mut values = Vec::new();
+        let len = u64::deserialize_with_mode(&mut reader, compress, validate)?
+            .try_into()
+            .map_err(|_| SerializationError::NotEnoughSpace)?;
+        let mut values = Vec::with_capacity(len);
         for _ in 0..len {
             values.push(T::deserialize_with_mode(
+                &mut reader,
+                compress,
+                Validate::No,
+            )?);
+        }
+
+        if let Validate::Yes = validate {
+            T::batch_check(values.iter())?
+        }
+        Ok(values)
+    }
+}
+
+// Helper function. Serializes any sequential data type to the format
+//     n as u64 || data[0].serialize() || ... || data[n].serialize()
+#[inline]
+fn serialize_seq<T, B, W>(
+    seq: impl ExactSizeIterator<Item = B>,
+    mut writer: W,
+    compress: Compress,
+) -> Result<(), SerializationError>
+where
+    T: CanonicalSerialize,
+    B: Borrow<T>,
+    W: Write,
+{
+    let len = seq.len() as u64;
+    len.serialize_with_mode(&mut writer, compress)?;
+    for item in seq {
+        item.borrow().serialize_with_mode(&mut writer, compress)?;
+    }
+    Ok(())
+}
+
+// Helper function. Describes the size of any data serialized using the above function
+#[inline]
+fn get_serialized_size_of_seq<T, B>(
+    seq: impl ExactSizeIterator<Item = B>,
+    compress: Compress,
+) -> usize
+where
+    T: CanonicalSerialize,
+    B: Borrow<T>,
+{
+    8 + seq
+        .map(|item| item.borrow().serialized_size(compress))
+        .sum::<usize>()
+}
+
+impl<T: CanonicalSerialize> CanonicalSerialize for VecDeque<T> {
+    #[inline]
+    fn serialize_with_mode<W: Write>(
+        &self,
+        writer: W,
+        compress: Compress,
+    ) -> Result<(), SerializationError> {
+        serialize_seq::<T, _, _>(self.iter(), writer, compress)
+    }
+
+    #[inline]
+    fn serialized_size(&self, compress: Compress) -> usize {
+        get_serialized_size_of_seq::<T, _>(self.iter(), compress)
+    }
+}
+
+// Identical to Valid for Vec<T>
+impl<T: Valid> Valid for VecDeque<T> {
+    #[inline]
+    fn check(&self) -> Result<(), SerializationError> {
+        T::batch_check(self.iter())
+    }
+
+    #[inline]
+    fn batch_check<'a>(
+        batch: impl Iterator<Item = &'a Self> + Send,
+    ) -> Result<(), SerializationError>
+    where
+        Self: 'a,
+    {
+        T::batch_check(batch.flat_map(|v| v.iter()))
+    }
+}
+
+// Identical to CanonicalSerialize for Vec<T>, except using the push_back() method
+impl<T: CanonicalDeserialize> CanonicalDeserialize for VecDeque<T> {
+    #[inline]
+    fn deserialize_with_mode<R: Read>(
+        mut reader: R,
+        compress: Compress,
+        validate: Validate,
+    ) -> Result<Self, SerializationError> {
+        let len = u64::deserialize_with_mode(&mut reader, compress, validate)?
+            .try_into()
+            .map_err(|_| SerializationError::NotEnoughSpace)?;
+        let mut values = VecDeque::with_capacity(len);
+        for _ in 0..len {
+            values.push_back(T::deserialize_with_mode(
+                &mut reader,
+                compress,
+                Validate::No,
+            )?);
+        }
+
+        if let Validate::Yes = validate {
+            T::batch_check(values.iter())?
+        }
+        Ok(values)
+    }
+}
+
+impl<T: CanonicalSerialize> CanonicalSerialize for LinkedList<T> {
+    #[inline]
+    fn serialize_with_mode<W: Write>(
+        &self,
+        writer: W,
+        compress: Compress,
+    ) -> Result<(), SerializationError> {
+        serialize_seq::<T, _, _>(self.iter(), writer, compress)
+    }
+
+    #[inline]
+    fn serialized_size(&self, compress: Compress) -> usize {
+        get_serialized_size_of_seq::<T, _>(self.iter(), compress)
+    }
+}
+
+// Identical to Valid for Vec<T>
+impl<T: Valid> Valid for LinkedList<T> {
+    #[inline]
+    fn check(&self) -> Result<(), SerializationError> {
+        T::batch_check(self.iter())
+    }
+
+    #[inline]
+    fn batch_check<'a>(
+        batch: impl Iterator<Item = &'a Self> + Send,
+    ) -> Result<(), SerializationError>
+    where
+        Self: 'a,
+    {
+        T::batch_check(batch.flat_map(|v| v.iter()))
+    }
+}
+
+// Identical to CanonicalSerialize for Vec<T>, except using the push_back() method, and the new()
+// constructor.
+impl<T: CanonicalDeserialize> CanonicalDeserialize for LinkedList<T> {
+    #[inline]
+    fn deserialize_with_mode<R: Read>(
+        mut reader: R,
+        compress: Compress,
+        validate: Validate,
+    ) -> Result<Self, SerializationError> {
+        let len = u64::deserialize_with_mode(&mut reader, compress, validate)?
+            .try_into()
+            .map_err(|_| SerializationError::NotEnoughSpace)?;
+        let mut values = LinkedList::new();
+        for _ in 0..len {
+            values.push_back(T::deserialize_with_mode(
                 &mut reader,
                 compress,
                 Validate::No,
@@ -528,23 +696,15 @@ impl<T: CanonicalSerialize> CanonicalSerialize for [T] {
     #[inline]
     fn serialize_with_mode<W: Write>(
         &self,
-        mut writer: W,
+        writer: W,
         compress: Compress,
     ) -> Result<(), SerializationError> {
-        let len = self.len() as u64;
-        len.serialize_with_mode(&mut writer, compress)?;
-        for item in self.iter() {
-            item.serialize_with_mode(&mut writer, compress)?;
-        }
-        Ok(())
+        serialize_seq::<T, _, _>(self.iter(), writer, compress)
     }
 
     #[inline]
     fn serialized_size(&self, compress: Compress) -> usize {
-        8 + self
-            .iter()
-            .map(|item| item.serialized_size(compress))
-            .sum::<usize>()
+        get_serialized_size_of_seq::<T, _>(self.iter(), compress)
     }
 }
 
@@ -649,6 +809,7 @@ impl_tuple!(A:0,);
 impl_tuple!(A:0, B:1,);
 impl_tuple!(A:0, B:1, C:2,);
 impl_tuple!(A:0, B:1, C:2, D:3,);
+impl_tuple!(A:0, B:1, C:2, D:3, E:4,);
 
 impl<K, V> CanonicalSerialize for BTreeMap<K, V>
 where

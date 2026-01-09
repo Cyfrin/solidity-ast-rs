@@ -1,4 +1,4 @@
-use crate::{algorithms, Uint};
+use crate::{Uint, algorithms};
 
 // FEATURE: sub_mod, neg_mod, inv_mod, div_mod, root_mod
 // See <https://en.wikipedia.org/wiki/Cipolla's_algorithm>
@@ -31,17 +31,50 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     /// Returns zero if the modulus is zero.
     #[inline]
     #[must_use]
-    pub fn add_mod(self, rhs: Self, modulus: Self) -> Self {
-        // Reduce inputs
-        let lhs = self.reduce_mod(modulus);
-        let rhs = rhs.reduce_mod(modulus);
-
-        // Compute the sum and conditionally subtract modulus once.
-        let (mut result, overflow) = lhs.overflowing_add(rhs);
-        if overflow || result >= modulus {
-            result -= modulus;
+    pub fn add_mod(mut self, rhs: Self, mut modulus: Self) -> Self {
+        if modulus.is_zero() {
+            return Self::ZERO;
         }
-        result
+
+        // This is not going to truncate with the final cast because the modulus value
+        // is 64 bits.
+        #[allow(clippy::cast_possible_truncation)]
+        if BITS <= 64 {
+            self.limbs[0] =
+                ((self.limbs[0] as u128 + rhs.limbs[0] as u128) % modulus.limbs[0] as u128) as u64;
+            return self;
+        }
+
+        // do overflowing add, then check if we should divrem
+        let (result, overflow) = self.overflowing_add(rhs);
+        if overflow {
+            // Add carry bit to the result. We might need an extra limb.
+            let_double_bits!(numerator);
+            let (limb, bit) = (BITS / 64, BITS % 64);
+            let numerator = &mut numerator[..=limb];
+            numerator[..LIMBS].copy_from_slice(result.as_limbs());
+            numerator[limb] |= 1 << bit;
+
+            // Reuse `div_rem` if we don't need an extra limb.
+            if const { crate::nlimbs(BITS + 1) == LIMBS } {
+                let numerator = unsafe { &mut *numerator.as_mut_ptr().cast::<Self>() };
+                Self::div_rem_by_ref(numerator, &mut modulus);
+            } else {
+                Self::div_rem_bits_plus_one(numerator.as_mut_ptr(), &mut modulus);
+            }
+
+            modulus
+        } else {
+            result.reduce_mod(modulus)
+        }
+    }
+
+    #[inline(never)]
+    fn div_rem_bits_plus_one(numerator: *mut u64, modulus: &mut Self) {
+        // TODO(dani): check if this is worth special casing over just using
+        // div_rem_double_bits
+        let numerator = unsafe { core::slice::from_raw_parts_mut(numerator, LIMBS + 1) };
+        algorithms::div::div_inlined(numerator, &mut modulus.limbs);
     }
 
     /// Compute $\mod{\mathtt{self} ⋅ \mathtt{rhs}}_{\mathtt{modulus}}$.
@@ -50,32 +83,28 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     ///
     /// See [`mul_redc`](Self::mul_redc) for a faster variant at the cost of
     /// some pre-computation.
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn mul_mod(self, rhs: Self, mut modulus: Self) -> Self {
+        self.mul_mod_by_ref(&rhs, &mut modulus);
+        modulus
+    }
+
+    #[inline(never)]
+    fn mul_mod_by_ref(&self, rhs: &Self, modulus: &mut Self) {
         if modulus.is_zero() {
-            return Self::ZERO;
+            return;
         }
-
-        // Allocate at least `nlimbs(2 * BITS)` limbs to store the product. This array
-        // casting is a workaround for `generic_const_exprs` not being stable.
-        let mut product = [[0u64; 2]; LIMBS];
-        let product_len = crate::nlimbs(2 * BITS);
-        debug_assert!(2 * LIMBS >= product_len);
-        // SAFETY: `[[u64; 2]; LIMBS] == [u64; 2 * LIMBS] >= [u64; nlimbs(2 * BITS)]`.
-        let product = unsafe {
-            core::slice::from_raw_parts_mut(product.as_mut_ptr().cast::<u64>(), product_len)
-        };
-
-        // Compute full product.
+        let_double_bits!(product);
         let overflow = algorithms::addmul(product, self.as_limbs(), rhs.as_limbs());
         debug_assert!(!overflow);
+        Self::div_rem_double_bits(product, modulus);
+    }
 
-        // Compute modulus using `div_rem`.
-        // This stores the remainder in the divisor, `modulus`.
-        algorithms::div(product, &mut modulus.limbs);
-
-        modulus
+    #[inline]
+    fn div_rem_double_bits(numerator: &mut [u64], modulus: &mut Self) {
+        assume!(numerator.len() == crate::nlimbs(BITS * 2));
+        algorithms::div::div_inlined(numerator, &mut modulus.limbs);
     }
 
     /// Compute $\mod{\mathtt{self}^{\mathtt{rhs}}}_{\mathtt{modulus}}$.
@@ -84,13 +113,12 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[inline]
     #[must_use]
     pub fn pow_mod(mut self, mut exp: Self, modulus: Self) -> Self {
-        if modulus.is_zero() || modulus <= Self::from(1) {
-            // Also covers Self::BITS == 0
+        if BITS == 0 || modulus <= Self::ONE {
             return Self::ZERO;
         }
 
         // Exponentiation by squaring
-        let mut result = Self::from(1);
+        let mut result = Self::ONE;
         while exp > Self::ZERO {
             // Multiply by base
             if exp.limbs[0] & 1 == 1 {
@@ -290,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_mul_redc() {
-        const_for!(BITS in NON_ZERO if (BITS >= 16) {
+        const_for!(BITS in NON_ZERO if BITS >= 16 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(a: U, b: U, m: U)| {
@@ -313,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_square_redc() {
-        const_for!(BITS in NON_ZERO if (BITS >= 16) {
+        const_for!(BITS in NON_ZERO if BITS >= 16 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(a: U, m: U)| {

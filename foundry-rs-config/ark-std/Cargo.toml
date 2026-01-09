@@ -12,8 +12,9 @@
 [package]
 edition = "2021"
 name = "ark-std"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["arkworks contributors"]
+build = false
 include = [
     "Cargo.toml",
     "src",
@@ -21,6 +22,10 @@ include = [
     "LICENSE-APACHE",
     "LICENSE-MIT",
 ]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "A library for no_std compatibility"
 homepage = "https://arkworks.rs"
 documentation = "https://docs.rs/ark-std/"
@@ -33,7 +38,7 @@ repository = "https://github.com/arkworks-rs/std"
 [profile.bench]
 opt-level = 3
 lto = "thin"
-debug = false
+debug = 0
 debug-assertions = false
 rpath = false
 incremental = true
@@ -44,9 +49,13 @@ opt-level = 0
 [profile.test]
 opt-level = 3
 lto = "thin"
-debug = true
+debug = 2
 debug-assertions = true
 incremental = true
+
+[lib]
+name = "ark_std"
+path = "src/lib.rs"
 
 [dependencies.colored]
 version = "2"

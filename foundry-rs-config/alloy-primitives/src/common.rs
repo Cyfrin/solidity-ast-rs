@@ -1,12 +1,13 @@
 use crate::Address;
 
 #[cfg(feature = "rlp")]
-use alloy_rlp::{Buf, BufMut, Decodable, Encodable, EMPTY_STRING_CODE};
+use alloy_rlp::{Buf, BufMut, Decodable, EMPTY_STRING_CODE, Encodable};
 
 /// The `to` field of a transaction. Either a target address, or empty for a
 /// contract creation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(derive_arbitrary::Arbitrary, proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary, proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
 #[doc(alias = "TransactionKind")]
 pub enum TxKind {
     /// A transaction that creates a contract.
@@ -54,7 +55,7 @@ impl TxKind {
 
     /// Consumes the type and returns the address of the contract that will be called or will
     /// receive the transfer.
-    pub fn into_to(self) -> Option<Address> {
+    pub const fn into_to(self) -> Option<Address> {
         match self {
             Self::Create => None,
             Self::Call(to) => Some(to),

@@ -39,6 +39,11 @@ impl<T> SpannedValue<T> {
     pub fn map_ref<U>(&self, map_fn: impl FnOnce(&T) -> U) -> SpannedValue<U> {
         SpannedValue::new(map_fn(&self.value), self.span)
     }
+
+    /// Gets the inner value, consuming `self` in the process.
+    pub fn into_inner(self) -> T {
+        self.value
+    }
 }
 
 impl<T: Default> Default for SpannedValue<T> {
@@ -96,6 +101,24 @@ impl<T: FromMeta> FromMeta for SpannedValue<T> {
         };
 
         Ok(Self::new(value, span))
+    }
+
+    fn from_nested_meta(item: &crate::ast::NestedMeta) -> Result<Self> {
+        T::from_nested_meta(item)
+            .map(|value| Self::new(value, item.span()))
+            .map_err(|e| e.with_span(item))
+    }
+
+    fn from_value(literal: &syn::Lit) -> Result<Self> {
+        T::from_value(literal)
+            .map(|value| Self::new(value, literal.span()))
+            .map_err(|e| e.with_span(literal))
+    }
+
+    fn from_expr(expr: &syn::Expr) -> Result<Self> {
+        T::from_expr(expr)
+            .map(|value| Self::new(value, expr.span()))
+            .map_err(|e| e.with_span(expr))
     }
 }
 

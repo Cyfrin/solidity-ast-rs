@@ -1,10 +1,11 @@
 # Rust `uint` crate using const-generics
 
-[![crates.io](https://buildstats.info/crate/ruint)](https://crates.io/crates/ruint)
+[![Crates.io Version](https://img.shields.io/crates/v/ruint)](https://crates.io/crates/ruint)
 [![docs.rs](https://img.shields.io/docsrs/ruint)](https://docs.rs/ruint)
 [![MIT License](https://img.shields.io/github/license/recmo/uint)](https://github.com/recmo/uint/blob/main/LICENSE)
 [![dependency status](https://deps.rs/repo/github/recmo/uint/status.svg)](https://deps.rs/repo/github/recmo/uint)
 [![codecov](https://codecov.io/gh/recmo/uint/branch/main/graph/badge.svg?token=WBPZ9U4TTO)](https://codecov.io/gh/recmo/uint)
+[![CodSpeed Badge](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/recmo/uint)
 [![CI](https://github.com/recmo/uint/actions/workflows/ci.yml/badge.svg)](https://github.com/recmo/uint/actions/workflows/ci.yml)
 
 Implements [`Uint<BITS, LIMBS>`], the ring of numbers modulo $2^{\mathsf{BITS}}$. It requires two
@@ -98,7 +99,7 @@ source files:
 
 ```rust
 # use ruint::uint;
-uint!{
+uint! {
 
 let a = 42_U256;
 let b = 0xf00f_1337_c0d3_U256;
@@ -121,7 +122,7 @@ When updating this, also update:
 
 Uint will keep a rolling MSRV (minimum supported rust version) policy of **at
 least** 6 months. When increasing the MSRV, the new Rust version must have been
-released at least six months ago. The current MSRV is 1.65.0.
+released at least six months ago. The current MSRV is 1.85.0.
 
 Note that the MSRV is not increased automatically, and only as part of a minor
 release.
@@ -131,8 +132,8 @@ release.
 There is support for a number of crates. These are enabled by setting the identically
 named feature flag.
 
-* `unstable` Enable sem-ver unstable features.
-* [`rand`](https://docs.rs/rand): Implements sampling from the [`Standard`](https://docs.rs/rand/latest/rand/distributions/struct.Standard.html) distribution, i.e. [`rng.gen()`](https://docs.rs/rand/latest/rand/trait.Rng.html#method.gen).
+* [`rand`](https://docs.rs/rand/0.8): Implements sampling from the [`Standard`](https://docs.rs/rand/0.8/rand/distributions/struct.Standard.html) distribution, i.e. [`rng.gen()`](https://docs.rs/rand/0.8/rand/trait.Rng.html#method.gen), alongside some utility `random*` methods on `Uint` itself.
+* [`rand-09`](https://docs.rs/rand/0.9): Implements sampling from the [`StandardUniform`](https://docs.rs/rand/0.9/rand/distr/struct.StandardUniform.html) distribution, i.e. [`rng.random()`](https://docs.rs/rand/0.9/rand/trait.Rng.html#method.random), alongside some utility `random*` methods on `Uint` itself.
 * [`arbitrary`](https://docs.rs/arbitrary): Implements the [`Arbitrary`](https://docs.rs/arbitrary/latest/arbitrary/trait.Arbitrary.html) trait, allowing [`Uint`]s to be generated for fuzz testing.
 * [`quickcheck`](https://docs.rs/quickcheck): Implements the [`Arbitrary`](https://docs.rs/quickcheck/latest/quickcheck/trait.Arbitrary.html) trait, allowing [`Uint`]s to be generated for property based testing.
 * [`proptest`](https://docs.rs/proptest): Implements the [`Arbitrary`](https://docs.rs/proptest/latest/proptest/arbitrary/trait.Arbitrary.html) trait, allowing [`Uint`]s to be generated for property based testing. Proptest is used for the `uint`s own test suite.
@@ -142,13 +143,15 @@ named feature flag.
 * [`primitive-types`](https://docs.rs/primitive-types): Implements the [`From<_>`] conversions between corresponding types.
 * [`postgres`](https://docs.rs/postgres): Implements the [`ToSql`](https://docs.rs/postgres/latest/postgres/types/trait.ToSql.html) trait supporting many column types.
 * [`num-bigint`](https://docs.rs/num-bigint): Implements conversion to/from [`BigUint`](https://docs.rs/num-bigint/latest/num_bigint/struct.BigUint.html) and [`BigInt`](https://docs.rs/num-bigint/latest/num_bigint/struct.BigInt.html).
+* [`bigdecimal`](https://docs.rs/bigdecimal) Implements conversion to/from [`BigDecimal`](https://docs.rs/bigdecimal/latest/bigdecimal/struct.BigDecimal.html).
 * [`ark-ff`](https://docs.rs/ark-ff): Implements conversion to/from the [`BigInteger*`](https://docs.rs/ark-ff/0.3.0/ark_ff/biginteger/index.html) types and the [`Fp*`](https://docs.rs/ark-ff/0.3.0/ark_ff/fields/models/index.html) types from `ark-ff@0.3`.
 * [`ark-ff-04`](https://docs.rs/ark-ff): Implements conversion to/from [`BigInt`](https://docs.rs/ark-ff/0.4.2/ark_ff/biginteger/struct.BigInt.html) and [`Fp`](https://docs.rs/ark-ff/0.4.2/ark_ff/fields/models/fp/struct.Fp.html) types from `ark-ff@0.4`.
+* [`ark-ff-05`](https://docs.rs/ark-ff): Implements conversion to/from [`BigInt`](https://docs.rs/ark-ff/0.5.0/ark_ff/biginteger/struct.BigInt.html) and [`Fp`](https://docs.rs/ark-ff/0.5.0/ark_ff/fields/models/fp/struct.Fp.html) types from `ark-ff@0.5`.
 * [`sqlx`](https://docs.rs/sqlx): Implements database agnostic storage as byte array. Requires
   `sqlx` to be used with the `tokio-native-tls` runtime, due to issue [sqlx#1627](https://github.com/launchbadge/sqlx/issues/1627).
 * [`zeroize`](https://docs.rs/zeroize): Implements the [`Zeroize`](https://docs.rs/zeroize/latest/zeroize/trait.Zeroize.html) trait. This makes [`Uint`] and [`Bits`] compatible with the [`secrecy`](https://crates.io/crates/secrecy) crate.
 * [`valuable`](https://docs.rs/valuable): Implements the [`Valuable`](https://docs.rs/valuable/0.1.0/valuable/trait.Valuable.html) trait.
-* [`pyo3`](https://docs.rs/pyo3): Implements the [`ToPyObject`](https://docs.rs/pyo3/latest/pyo3/conversion/trait.ToPyObject.html), [`IntoPy`](https://docs.rs/pyo3/latest/pyo3/conversion/trait.IntoPy.html) and [`FromPyObject`](https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html) traits.
+* [`pyo3`](https://docs.rs/pyo3): Implements the [`IntoPyObject`](https://docs.rs/pyo3/latest/pyo3/conversion/trait.IntoPyObject.html) and [`FromPyObject`](https://docs.rs/pyo3/latest/pyo3/conversion/trait.FromPyObject.html) traits.
 * [`parity-scale-codec`](https://docs.rs/parity-scale-codec): Implements the [`Encode`](https://docs.rs/parity-scale-codec/latest/parity_scale_codec/trait.Encode.html), [`Decode`](https://docs.rs/parity-scale-codec/latest/parity_scale_codec/trait.Decode.html), [`MaxEncodedLen`](https://github.com/paritytech/parity-scale-codec/blob/47d98a1c23dabc890fdb548d115a18070082c66e/src/max_encoded_len.rs) and [`HasCompact`](https://docs.rs/parity-scale-codec/latest/parity_scale_codec/trait.HasCompact.html) traits.
 * [`bn-rs`](https://docs.rs/bn-rs/latest/bn_rs/): Implements conversion to/from the [`BN`](https://docs.rs/bn-rs/latest/bn_rs/struct.BN.html) and [`BigNumber`](https://docs.rs/bn-rs/latest/bn_rs/struct.BigNumber.html).
 * [`bytemuck`](https://docs.rs/bytemuck): Implements the [`Pod`](https://docs.rs/bytemuck/latest/bytemuck/trait.Pod.html) and [`Zeroable`](https://docs.rs/bytemuck/latest/bytemuck/trait.Zeroable.html) traits for [`Uint`] where the size is a multiple of 64, up to 1024. This allows `Uint` to be used where a `Pod` trait bound exists.
@@ -156,6 +159,9 @@ named feature flag.
 * [`subtle`](https://docs.rs/subtle): Implements [`Uint::bit_ct`], [`ConditionallySelectable`](https://docs.rs/subtle/latest/subtle/trait.ConditionallySelectable.html),[`ConditionallyNegatable`](https://docs.rs/subtle/latest/subtle/trait.ConditionallyNegatable.html), [`ConstantTimeEq`](https://docs.rs/subtle/latest/subtle/trait.ConstantTimeEq.html)/[`ConstantTimeGreater`](https://docs.rs/subtle/latest/subtle/trait.ConstantTimeGreater.html)/[`ConstantTimeLess`](https://docs.rs/subtle/latest/subtle/trait.ConstantTimeLess.html).
 * [`der`](https://docs.rs/der): Implements [`Encode`](https://docs.rs/der/latest/der/trait.Encode.html)/[`Decode`](https://docs.rs/der/latest/der/trait.Decode.html) and [`TryFrom`]/[`From`] casting for [`Any`](https://docs.rs/der/latest/der/asn1/struct.Any.html), [`AnyRef`](https://docs.rs/der/latest/der/asn1/struct.AnyRef.html), [`Int`](https://docs.rs/der/latest/der/asn1/struct.Int.html), [`IntRef`](https://docs.rs/der/latest/der/asn1/struct.IntRef.html), [`Uint`](https://docs.rs/der/latest/der/asn1/struct.Uint.html), [`UintRef`](https://docs.rs/der/latest/der/asn1/struct.UintRef.html).
 * [`diesel`](https://docs.rs/diesel): Implements the [`ToSql`](https://docs.rs/diesel/latest/diesel/serialize/trait.ToSql.html) and [`FromSql`](https://docs.rs/diesel/latest/diesel/deserialize/trait.FromSql.html) traits for storing `Uint` values as byte arrays in databases supported by Diesel.
+* [`rkyv`](https://docs.rs/rkyv/): Implements the [`Archive`](https://docs.rs/rkyv/latest/rkyv/trait.Archive.html), [`Serialize`](https://docs.rs/rkyv/latest/rkyv/trait.Serialize.html), [`Deserialize`](https://docs.rs/rkyv/latest/rkyv/trait.Deserialize.html) and [`Portable`](https://docs.rs/rkyv/latest/rkyv/trait.Portable.html) traits for `Uint` and `Bits`.
+  Implements [`ArchivedUint`](https://docs.rs/ruint/latest/ruint/support/rkyv/struct.ArchivedUint.html) and [`ArchivedBits`](https://docs.rs/ruint/latest/ruint/support/rkyv/struct.ArchivedBits.html) types that can be used to access `Uint` and `Bits` values from an archive without needing to allocate new memory.
+  This allows for zero-copy deserialization of `Uint` and `Bits` values.
 
 ## Building and testing
 

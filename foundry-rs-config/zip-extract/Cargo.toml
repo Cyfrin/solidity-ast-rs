@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "zip-extract"
-version = "0.2.2"
+version = "0.4.1"
 authors = ["M*C*O <mcofficer@gmx.de>"]
 build = false
 autolib = false
@@ -20,7 +20,7 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Archive extraction via zip-rs, automated."
+description = "Deprecated, use the zip crate instead."
 readme = "README.md"
 keywords = [
     "zip",
@@ -38,12 +38,13 @@ chrono = ["zip/chrono"]
 default = ["zip/default"]
 deflate = ["zip/deflate"]
 deflate-flate2 = ["zip/deflate-flate2"]
-deflate-miniz = ["zip/deflate-miniz"]
-deflate-zlib = ["zip/deflate-zlib"]
-deflate-zlib-ng = ["zip/deflate-zlib-ng"]
+deflate-flate2-zlib = ["zip/deflate-flate2-zlib"]
+deflate-flate2-zlib-rs = ["zip/deflate-flate2-zlib-rs"]
 deflate-zopfli = ["zip/deflate-zopfli"]
 deflate64 = ["zip/deflate64"]
+jiff-02 = ["zip/jiff-02"]
 lzma = ["zip/lzma"]
+nt-time = ["zip/nt-time"]
 time = ["zip/time"]
 unreserved = ["zip/unreserved"]
 xz = ["zip/xz"]
@@ -64,7 +65,7 @@ version = "0.4"
 version = "2.0"
 
 [dependencies.zip]
-version = "2"
+version = "4"
 default-features = false
 
 [dev-dependencies.cute-log]

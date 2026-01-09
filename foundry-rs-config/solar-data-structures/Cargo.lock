@@ -4,27 +4,27 @@ version = 4
 
 [[package]]
 name = "autocfg"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
+checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "bitflags"
-version = "2.9.0"
+version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
+checksum = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394"
 
 [[package]]
 name = "bumpalo"
-version = "3.17.0"
+version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1628fb46dfa0b37568d12e5edd512553eccf6a22a78e8bde00bb4aed84d5bdbf"
+checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
 
 [[package]]
 name = "cfg-if"
-version = "1.0.0"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+checksum = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9"
 
 [[package]]
 name = "crossbeam-deque"
@@ -65,9 +65,9 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "hashbrown"
-version = "0.15.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
+checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
 
 [[package]]
 name = "index_vec"
@@ -77,9 +77,9 @@ checksum = "44faf5bb8861a9c72e20d3fb0fdbd59233e43056e2b80475ab0aacdc2e781355"
 
 [[package]]
 name = "indexmap"
-version = "2.9.0"
+version = "2.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
+checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -87,15 +87,15 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.171"
+version = "0.2.176"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
+checksum = "58f929b4d672ea937a23a1ab494143d968337a5f47e56d0815df1e0890ddf174"
 
 [[package]]
 name = "lock_api"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
+checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -103,9 +103,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.12.3"
+version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
+checksum = "70d58bf43669b5795d1576d0641cfb6fbb2057bf629506267a92807158584a13"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -113,9 +113,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot_core"
-version = "0.9.10"
+version = "0.9.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e401f977ab385c9e4e3ab30627d6f26d00e2c73eef317493c4ec6d468726cf8"
+checksum = "bc838d2a56b5b1a6c25f55575dfc605fabb63bb2365f6c2353ef9159aa69e4a5"
 dependencies = [
  "cfg-if",
  "libc",
@@ -126,9 +126,9 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
+checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
 dependencies = [
  "either",
  "rayon-core",
@@ -136,9 +136,9 @@ dependencies = [
 
 [[package]]
 name = "rayon-core"
-version = "1.12.1"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1465873a3dfdaa8ae7cb14b4383657caab0b3e8a0aa9ae8e04b044854c8dfce2"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
@@ -146,9 +146,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.11"
+version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2f103c6d277498fbceb16e84d317e2a400f160f46904d5f5410848c829511a3"
+checksum = "5407465600fb0548f1442edf71dd20683c6ed326200ace4b1ef0763521bb3b77"
 dependencies = [
  "bitflags",
 ]
@@ -167,13 +167,13 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "smallvec"
-version = "1.15.0"
+version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
+checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "solar-data-structures"
-version = "0.1.2"
+version = "0.1.8"
 dependencies = [
  "bumpalo",
  "index_vec",

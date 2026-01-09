@@ -11,9 +11,9 @@
 
 [package]
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.76"
 name = "foundry-block-explorers"
-version = "0.13.1"
+version = "0.22.0"
 authors = ["Foundry Maintainers"]
 build = false
 exclude = [
@@ -65,10 +65,10 @@ name = "it"
 path = "tests/it/main.rs"
 
 [dependencies.alloy-chains]
-version = "0.1"
+version = "0.2"
 
 [dependencies.alloy-json-abi]
-version = "0.8"
+version = "1.3"
 features = [
     "std",
     "serde_json",
@@ -76,7 +76,7 @@ features = [
 default-features = false
 
 [dependencies.alloy-primitives]
-version = "0.8"
+version = "1.3"
 features = [
     "std",
     "serde",
@@ -86,7 +86,7 @@ features = [
 default-features = false
 
 [dependencies.foundry-compilers]
-version = "0.14"
+version = "0.19.0"
 optional = true
 
 [dependencies.reqwest]
@@ -111,19 +111,19 @@ features = [
 version = "1.0"
 
 [dependencies.thiserror]
-version = "1.0"
+version = "2.0"
 
 [dependencies.tracing]
-version = "0.1.37"
+version = "0.1.41"
 
 [dev-dependencies.serial_test]
-version = "3.0.0"
+version = "3.2.0"
 
 [dev-dependencies.tempfile]
-version = "3.8"
+version = "3.20"
 
 [dev-dependencies.tokio]
-version = "1.37"
+version = "1.47"
 features = [
     "macros",
     "rt-multi-thread",
@@ -131,7 +131,7 @@ features = [
 ]
 
 [dev-dependencies.tracing-subscriber]
-version = "0.3.17"
+version = "0.3.19"
 features = [
     "env-filter",
     "fmt",

@@ -43,7 +43,7 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
     #[inline]
     #[must_use]
     pub fn log(self, base: Self) -> usize {
-        assert!(self != Self::ZERO);
+        assert!(!self.is_zero());
         assert!(base >= Self::from(2));
         if base == Self::from(2) {
             return self.bit_len() - 1;
@@ -64,17 +64,17 @@ impl<const BITS: usize, const LIMBS: usize> Uint<BITS, LIMBS> {
         loop {
             if let Some(value) = base.checked_pow(result) {
                 if value > self {
-                    assert!(result != Self::ZERO);
-                    result -= Self::from(1);
+                    assert!(!result.is_zero());
+                    result -= Self::ONE;
                     continue;
                 }
             } else {
                 // Overflow, so definitely larger than `value`
-                result -= Self::from(1);
+                result -= Self::ONE;
             }
             break;
         }
-        while let Some(trial) = result.checked_add(Self::from(1)) {
+        while let Some(trial) = result.checked_add(Self::ONE) {
             if let Some(value) = base.checked_pow(trial) {
                 if value <= self {
                     result = trial;
@@ -189,14 +189,14 @@ mod tests {
 
     #[test]
     fn test_pow_log() {
-        const_for!(BITS in NON_ZERO if (BITS >= 64) {
+        const_for!(BITS in NON_ZERO if BITS >= 64 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(b in 2_u64..100, e in 0..BITS)| {
                 if let Some(value) = U::from(b).checked_pow(U::from(e)) {
                     assert!(value > U::ZERO);
                     assert_eq!(value.log(U::from(b)), e);
-                    // assert_eq!(value.log(b + U::from(1)), e as u64);
+                    // assert_eq!(value.log(b + U::ONE), e as u64);
                 }
             });
         });
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_log_pow() {
-        const_for!(BITS in NON_ZERO if (BITS >= 64) {
+        const_for!(BITS in NON_ZERO if BITS >= 64 {
             const LIMBS: usize = nlimbs(BITS);
             type U = Uint<BITS, LIMBS>;
             proptest!(|(b in 2_u64..100, n: U)| {

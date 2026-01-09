@@ -3,14 +3,15 @@ use std::iter::FromIterator;
 use crate::key::Key;
 use crate::repr::Decor;
 use crate::table::{Iter, IterMut, KeyValuePairs, TableLike};
-use crate::{InternalString, Item, KeyMut, RawString, Table, Value};
+use crate::{Item, KeyMut, RawString, Table, Value};
 
-/// Type representing a TOML inline table,
-/// payload of the `Value::InlineTable` variant
+/// A TOML [`Value`] that contains a collection of [`Key`]/[`Value`] pairs
 #[derive(Debug, Default, Clone)]
 pub struct InlineTable {
-    // `preamble` represents whitespaces in an empty table
-    preamble: RawString,
+    // `trailing` represents whitespaces, newlines
+    // and comments in an empty array or after the trailing comma
+    trailing: RawString,
+    trailing_comma: bool,
     // Whether to hide an empty table
     pub(crate) implicit: bool,
     // prefix before `{` and suffix after `}`
@@ -72,6 +73,9 @@ impl InlineTable {
                 Item::Value(value) => {
                     values.push((path, value));
                 }
+                Item::Table(table) => {
+                    table.append_all_values(&path, values);
+                }
                 _ => {}
             }
         }
@@ -82,7 +86,33 @@ impl InlineTable {
         decorate_inline_table(self);
     }
 
-    /// Sorts the key/value pairs by key.
+    /// Set whether the array will use a trailing comma
+    pub fn set_trailing_comma(&mut self, yes: bool) {
+        self.trailing_comma = yes;
+    }
+
+    /// Whether the array will use a trailing comma
+    pub fn trailing_comma(&self) -> bool {
+        self.trailing_comma
+    }
+
+    /// Set whitespace after last element
+    pub fn set_trailing(&mut self, trailing: impl Into<RawString>) {
+        self.trailing = trailing.into();
+    }
+
+    /// Whitespace after last element
+    pub fn trailing(&self) -> &RawString {
+        &self.trailing
+    }
+
+    /// Sorts [Key]/[Value]-pairs of the table
+    ///
+    /// <div class="warning">
+    ///
+    /// This is not recursive.
+    ///
+    /// </div>
     pub fn sort_values(&mut self) {
         // Assuming standard tables have their position set and this won't negatively impact them
         self.items.sort_keys();
@@ -96,10 +126,16 @@ impl InlineTable {
         }
     }
 
-    /// Sort Key/Value Pairs of the table using the using the comparison function `compare`.
+    /// Sort [Key]/[Value]-pairs of the table using the using the comparison function `compare`
     ///
     /// The comparison function receives two key and value pairs to compare (you can sort by keys or
     /// values or their combination as needed).
+    ///
+    /// <div class="warning">
+    ///
+    /// This is not recursive.
+    ///
+    /// </div>
     pub fn sort_values_by<F>(&mut self, mut compare: F)
     where
         F: FnMut(&Key, &Value, &Key, &Value) -> std::cmp::Ordering,
@@ -195,36 +231,9 @@ impl InlineTable {
             .map(|(_, key, _)| key.as_mut())
     }
 
-    /// Returns the decor associated with a given key of the table.
-    #[deprecated(since = "0.21.1", note = "Replaced with `key_mut`")]
-    pub fn key_decor_mut(&mut self, key: &str) -> Option<&mut Decor> {
-        #![allow(deprecated)]
-        use indexmap::map::MutableKeys;
-        self.items
-            .get_full_mut2(key)
-            .map(|(_, key, _)| key.leaf_decor_mut())
-    }
-
-    /// Returns the decor associated with a given key of the table.
-    #[deprecated(since = "0.21.1", note = "Replaced with `key_mut`")]
-    pub fn key_decor(&self, key: &str) -> Option<&Decor> {
-        #![allow(deprecated)]
-        self.items.get_full(key).map(|(_, key, _)| key.leaf_decor())
-    }
-
-    /// Set whitespace after before element
-    pub fn set_preamble(&mut self, preamble: impl Into<RawString>) {
-        self.preamble = preamble.into();
-    }
-
-    /// Whitespace after before element
-    pub fn preamble(&self) -> &RawString {
-        &self.preamble
-    }
-
     /// The location within the original document
     ///
-    /// This generally requires an [`ImDocument`][crate::ImDocument].
+    /// This generally requires a [`Document`][crate::Document].
     pub fn span(&self) -> Option<std::ops::Range<usize>> {
         self.span.clone()
     }
@@ -233,7 +242,7 @@ impl InlineTable {
         use indexmap::map::MutableKeys;
         self.span = None;
         self.decor.despan(input);
-        self.preamble.despan(input);
+        self.trailing.despan(input);
         for (key, value) in self.items.iter_mut2() {
             key.despan(input);
             value.despan(input);
@@ -279,7 +288,7 @@ impl InlineTable {
     }
 
     /// Gets the given key's corresponding entry in the Table for in-place manipulation.
-    pub fn entry(&'_ mut self, key: impl Into<InternalString>) -> InlineEntry<'_> {
+    pub fn entry(&'_ mut self, key: impl Into<String>) -> InlineEntry<'_> {
         match self.items.entry(key.into().into()) {
             indexmap::map::Entry::Occupied(mut entry) => {
                 // Ensure it is a `Value` to simplify `InlineOccupiedEntry`'s code.
@@ -368,7 +377,7 @@ impl InlineTable {
     /// Returns a mutable reference to the corresponding value.
     pub fn get_or_insert<V: Into<Value>>(
         &mut self,
-        key: impl Into<InternalString>,
+        key: impl Into<String>,
         value: V,
     ) -> &mut Value {
         let key = key.into();
@@ -380,7 +389,7 @@ impl InlineTable {
     }
 
     /// Inserts a key-value pair into the map.
-    pub fn insert(&mut self, key: impl Into<InternalString>, value: Value) -> Option<Value> {
+    pub fn insert(&mut self, key: impl Into<String>, value: Value) -> Option<Value> {
         use indexmap::map::MutableEntryKey;
         let key = Key::new(key);
         let value = Item::Value(value);
@@ -468,14 +477,14 @@ impl<K: Into<Key>, V: Into<Value>> FromIterator<(K, V)> for InlineTable {
     where
         I: IntoIterator<Item = (K, V)>,
     {
-        let mut table = InlineTable::new();
+        let mut table = Self::new();
         table.extend(iter);
         table
     }
 }
 
 impl IntoIterator for InlineTable {
-    type Item = (InternalString, Value);
+    type Item = (String, Value);
     type IntoIter = InlineTableIntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -511,11 +520,11 @@ fn decorate_inline_table(table: &mut InlineTable) {
     }
 }
 
-/// An owned iterator type over key/value pairs of an inline table.
-pub type InlineTableIntoIter = Box<dyn Iterator<Item = (InternalString, Value)>>;
-/// An iterator type over key/value pairs of an inline table.
+/// An owned iterator type over an [`InlineTable`]'s [`Key`]/[`Value`] pairs
+pub type InlineTableIntoIter = Box<dyn Iterator<Item = (String, Value)>>;
+/// An iterator type over [`InlineTable`]'s [`Key`]/[`Value`] pairs
 pub type InlineTableIter<'a> = Box<dyn Iterator<Item = (&'a str, &'a Value)> + 'a>;
-/// A mutable iterator type over key/value pairs of an inline table.
+/// A mutable iterator type over [`InlineTable`]'s [`Key`]/[`Value`] pairs
 pub type InlineTableIterMut<'a> = Box<dyn Iterator<Item = (KeyMut<'a>, &'a mut Value)> + 'a>;
 
 impl TableLike for InlineTable {
@@ -534,7 +543,7 @@ impl TableLike for InlineTable {
         self.clear();
     }
     fn entry<'a>(&'a mut self, key: &str) -> crate::Entry<'a> {
-        // Accept a `&str` rather than an owned type to keep `InternalString`, well, internal
+        // Accept a `&str` rather than an owned type to keep `String`, well, internal
         match self.items.entry(key.into()) {
             indexmap::map::Entry::Occupied(entry) => {
                 crate::Entry::Occupied(crate::OccupiedEntry { entry })
@@ -600,20 +609,12 @@ impl TableLike for InlineTable {
     fn key_mut(&mut self, key: &str) -> Option<KeyMut<'_>> {
         self.key_mut(key)
     }
-    fn key_decor_mut(&mut self, key: &str) -> Option<&mut Decor> {
-        #![allow(deprecated)]
-        self.key_decor_mut(key)
-    }
-    fn key_decor(&self, key: &str) -> Option<&Decor> {
-        #![allow(deprecated)]
-        self.key_decor(key)
-    }
 }
 
 // `{ key1 = value1, ... }`
 pub(crate) const DEFAULT_INLINE_KEY_DECOR: (&str, &str) = (" ", " ");
 
-/// A view into a single location in a map, which may be vacant or occupied.
+/// A view into a single location in an [`InlineTable`], which may be vacant or occupied.
 pub enum InlineEntry<'a> {
     /// An occupied Entry.
     Occupied(InlineOccupiedEntry<'a>),
@@ -659,7 +660,7 @@ impl<'a> InlineEntry<'a> {
     }
 }
 
-/// A view into a single occupied location in a `IndexMap`.
+/// A view into a single occupied location in an [`InlineTable`].
 pub struct InlineOccupiedEntry<'a> {
     entry: indexmap::map::OccupiedEntry<'a, Key, Item>,
 }
@@ -714,7 +715,7 @@ impl<'a> InlineOccupiedEntry<'a> {
     }
 }
 
-/// A view into a single empty location in a `IndexMap`.
+/// A view into a single empty location in an [`InlineTable`].
 pub struct InlineVacantEntry<'a> {
     entry: indexmap::map::VacantEntry<'a, Key, Item>,
 }

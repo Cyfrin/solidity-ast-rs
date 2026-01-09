@@ -1,10 +1,193 @@
 # Changelog
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [21.0.2](https://github.com/bluealloy/revm/compare/revm-primitives-v21.0.1...revm-primitives-v21.0.2) - 2025-11-07
+
+### Other
+
+- tag v96 revm v31.0.0 ([#3135](https://github.com/bluealloy/revm/pull/3135))
+
+## [21.0.1](https://github.com/bluealloy/revm/compare/revm-primitives-v21.0.0...revm-primitives-v21.0.1) - 2025-10-15
+
+### Other
+
+- resize short addresses bitvec instead of reallocating ([#3083](https://github.com/bluealloy/revm/pull/3083))
+
+## [21.0.0](https://github.com/bluealloy/revm/compare/revm-primitives-v20.2.1...revm-primitives-v21.0.0) - 2025-10-07
+
+### Added
+
+- *(revme)* ef blockchain tests cli ([#2935](https://github.com/bluealloy/revm/pull/2935))
+
+### Fixed
+
+- Align no_std OnceLock semantics with std ([#3026](https://github.com/bluealloy/revm/pull/3026))
+- racecondition return on install_crypto fn ([#2997](https://github.com/bluealloy/revm/pull/2997))
+- Apply spelling corrections from PRs #2926, #2915, #2908 ([#2978](https://github.com/bluealloy/revm/pull/2978))
+
+### Other
+
+- add boundless ([#3043](https://github.com/bluealloy/revm/pull/3043))
+- add SECURITY.md ([#2956](https://github.com/bluealloy/revm/pull/2956))
+- add amsterdam in spec id ([#2934](https://github.com/bluealloy/revm/pull/2934))
+- *(cleanup)* Remove EIP-7918 related functions and EIP file  ([#2925](https://github.com/bluealloy/revm/pull/2925))
+- cargo update ([#2930](https://github.com/bluealloy/revm/pull/2930))
+
+## [20.2.1](https://github.com/bluealloy/revm/compare/revm-primitives-v20.2.0...revm-primitives-v20.2.1) - 2025-08-12
+
+### Other
+
+- small performance and safety improvements ([#2868](https://github.com/bluealloy/revm/pull/2868))
+
+## [20.2.0](https://github.com/bluealloy/revm/compare/revm-primitives-v20.1.0...revm-primitives-v20.2.0) - 2025-08-06
+
+### Added
+
+- short address for journal cold/warm check ([#2849](https://github.com/bluealloy/revm/pull/2849))
+
+### Other
+
+- update README.md ([#2842](https://github.com/bluealloy/revm/pull/2842))
+- improve primitives crate documentation and consistency ([#2829](https://github.com/bluealloy/revm/pull/2829))
+- reuse global crypto provide idea ([#2786](https://github.com/bluealloy/revm/pull/2786))
+- add rust-version and note about MSRV ([#2789](https://github.com/bluealloy/revm/pull/2789))
+- add OnceLock re-export with no_std support ([#2787](https://github.com/bluealloy/revm/pull/2787))
+# Changelog
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [20.1.0](https://github.com/bluealloy/revm/compare/revm-primitives-v20.0.0...revm-primitives-v20.1.0) - 2025-07-23
+
+### Added
+
+- *(osaka)* update EIP-7825 constant ([#2753](https://github.com/bluealloy/revm/pull/2753))
+- expose sha3-keccak in revm and revm-primitives ([#2713](https://github.com/bluealloy/revm/pull/2713))
+
+### Fixed
+
+- features and check in ci ([#2766](https://github.com/bluealloy/revm/pull/2766))
+
+## [20.0.0](https://github.com/bluealloy/revm/compare/revm-primitives-v19.2.0...revm-primitives-v20.0.0) - 2025-06-19
+
+### Added
+
+- remove EOF ([#2644](https://github.com/bluealloy/revm/pull/2644))
+- configurable contract size limit ([#2611](https://github.com/bluealloy/revm/pull/2611)) ([#2642](https://github.com/bluealloy/revm/pull/2642))
+- *(precompile)* rug/gmp-based modexp ([#2596](https://github.com/bluealloy/revm/pull/2596))
+
+## [19.2.0](https://github.com/bluealloy/revm/compare/revm-primitives-v19.1.0...revm-primitives-v19.2.0) - 2025-06-06
+
+### Added
+
+- *(Osaka)* EIP-7825 tx limit cap ([#2575](https://github.com/bluealloy/revm/pull/2575))
+- transact multi tx ([#2517](https://github.com/bluealloy/revm/pull/2517))
+
+### Other
+
+- support functions for eip7918 ([#2579](https://github.com/bluealloy/revm/pull/2579))
+
+## [19.1.0](https://github.com/bluealloy/revm/compare/revm-primitives-v19.0.0...revm-primitives-v19.1.0) - 2025-05-22
+
+### Added
+
+- *(Osaka)* modexp input limit and gas change, EIP-7823 and EIP-7883 ([#2531](https://github.com/bluealloy/revm/pull/2531))
+
+### Other
+
+- nit, activation timestamp was 84, first 7702 bundle landed in 86 ([#2528](https://github.com/bluealloy/revm/pull/2528))
+- make crates.io version badge clickable ([#2526](https://github.com/bluealloy/revm/pull/2526))
+- add Prague activation timestamp ([#2514](https://github.com/bluealloy/revm/pull/2514))
+- Storage Types Alias ([#2461](https://github.com/bluealloy/revm/pull/2461))
+
+## [19.0.0](https://github.com/bluealloy/revm/compare/revm-primitives-v18.0.0...revm-primitives-v19.0.0) - 2025-05-07
+
+### Added
+
+- *(Osaka)* disable EOF ([#2480](https://github.com/bluealloy/revm/pull/2480))
+- *(EOF)* Changes needed for devnet-1 ([#2377](https://github.com/bluealloy/revm/pull/2377))
+
+### Other
+
+- copy edit The Book ([#2463](https://github.com/bluealloy/revm/pull/2463))
+- bump dependency version ([#2431](https://github.com/bluealloy/revm/pull/2431))
+- fixed broken link ([#2421](https://github.com/bluealloy/revm/pull/2421))
+- replaced SpecId enumn with num_enum ([#2420](https://github.com/bluealloy/revm/pull/2420))
+- bump stable tests, introduce lints ([#2403](https://github.com/bluealloy/revm/pull/2403))
+
+## [18.0.0](https://github.com/bluealloy/revm/compare/revm-primitives-v17.0.0...revm-primitives-v18.0.0) - 2025-04-09
+
+### Other
+
+- add 0x prefix to b256! and address! calls ([#2345](https://github.com/bluealloy/revm/pull/2345))
+
+## [17.0.0](https://github.com/bluealloy/revm/compare/revm-primitives-v16.0.0...revm-primitives-v17.0.0) - 2025-03-28
+
+### Other
+
+- Remove LATEST variant from SpecId enum ([#2299](https://github.com/bluealloy/revm/pull/2299))
+- make number more readable ([#2300](https://github.com/bluealloy/revm/pull/2300))
+
+## [16.0.0](https://github.com/bluealloy/revm/compare/revm-primitives-v16.0.0-alpha.5...revm-primitives-v16.0.0) - 2025-03-24
+
+Stable version
+
+## [16.0.0-alpha.5](https://github.com/bluealloy/revm/compare/revm-primitives-v16.0.0-alpha.4...revm-primitives-v16.0.0-alpha.5) - 2025-03-21
+
+### Other
+
+- make str to SpecId conversion fallible ([#2236](https://github.com/bluealloy/revm/pull/2236))
+- remove blockhash windows const ([#2228](https://github.com/bluealloy/revm/pull/2228))
+
+## [16.0.0-alpha.4](https://github.com/bluealloy/revm/compare/revm-primitives-v16.0.0-alpha.3...revm-primitives-v16.0.0-alpha.4) - 2025-03-16
+
+### Added
+
+- *(docs)* MyEvm example and book cleanup ([#2218](https://github.com/bluealloy/revm/pull/2218))
+
+## [16.0.0-alpha.3](https://github.com/bluealloy/revm/compare/revm-primitives-v16.0.0-alpha.2...revm-primitives-v16.0.0-alpha.3) - 2025-03-11
+
+### Fixed
+
+- correct propagate features ([#2177](https://github.com/bluealloy/revm/pull/2177))
+
+## [16.0.0-alpha.2](https://github.com/bluealloy/revm/compare/revm-primitives-v16.0.0-alpha.1...revm-primitives-v16.0.0-alpha.2) - 2025-03-10
+
+### Added
+
+- remove specification crate ([#2165](https://github.com/bluealloy/revm/pull/2165))
+
+### Other
+
+- move all dependencies to workspace ([#2092](https://github.com/bluealloy/revm/pull/2092))
+
+## [16.0.0-alpha.1](https://github.com/bluealloy/revm/compare/revm-primitives-v15.1.0...revm-primitives-v16.0.0-alpha.1) - 2025-02-16
+
+### Added
+
+- *(eip7702)* apply latest EIP-7702 changes, backport from v52 (#1969)
+- simplify Transaction trait (#1959)
+- restructuring Part6 transaction crate (#1814)
+- restructure Part2 database crate (#1784)
+- project restructuring Part1 (#1776)
+- to_plain_state (#1778)
+- introducing EvmWiring, a chain-specific configuration (#1672)
+
+### Other
+
+- backport op l1 fetch perf (#2076)
+- Bump licence year to 2025 (#2058)
+- align crates versions (#1983)
+- Update HISTORY_STORAGE_ADDRESS (#1946)
+- fix comments and docs into more sensible (#1920)
+- *(primitives)* replace HashMap re-exports with alloy_primitives::map (#1805)
 
 ## [15.1.0](https://github.com/bluealloy/revm/compare/revm-primitives-v14.0.0...revm-primitives-v15.1.0) - 2024-12-26
 
@@ -66,6 +249,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Other
 
 - *(deps)* bump alloy-primitives from 0.8.0 to 0.8.2 ([#1761](https://github.com/bluealloy/revm/pull/1761))
+
+## [9.0.1](https://github.com/bluealloy/revm/compare/revm-primitives-v9.0.0...revm-primitives-v9.0.1) - 2024-08-30
+
+### Other
+- Bump new logo ([#1735](https://github.com/bluealloy/revm/pull/1735))
+- bump kzg-rs version ([#1734](https://github.com/bluealloy/revm/pull/1734))
 
 ## [9.0.1](https://github.com/bluealloy/revm/compare/revm-primitives-v9.0.0...revm-primitives-v9.0.1) - 2024-08-30
 

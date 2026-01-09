@@ -4,7 +4,9 @@ use syn::Ident;
 
 use crate::codegen::FromDeriveInputImpl;
 use crate::options::{DeriveInputShapeSet, OuterFrom, ParseAttribute, ParseData};
-use crate::{FromMeta, Result};
+use crate::{FromField, FromMeta, Result};
+
+use super::forwarded_field::ForwardedField;
 
 #[derive(Debug)]
 pub struct FdiOptions {
@@ -14,9 +16,10 @@ pub struct FdiOptions {
     pub vis: Option<Ident>,
 
     /// The field on the target struct which should receive the type generics, if any.
-    pub generics: Option<Ident>,
+    pub generics: Option<ForwardedField>,
 
-    pub data: Option<Ident>,
+    /// The field on the target struct which should receive the derive input body, if any.
+    pub data: Option<ForwardedField>,
 
     pub supports: Option<DeriveInputShapeSet>,
 }
@@ -58,11 +61,11 @@ impl ParseData for FdiOptions {
                 Ok(())
             }
             Some("data") => {
-                self.data.clone_from(&field.ident);
+                self.data = ForwardedField::from_field(field).map(Some)?;
                 Ok(())
             }
             Some("generics") => {
-                self.generics.clone_from(&field.ident);
+                self.generics = ForwardedField::from_field(field).map(Some)?;
                 Ok(())
             }
             _ => self.base.parse_field(field),

@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.83"
+edition = "2024"
+rust-version = "1.89"
 name = "foundry-config"
-version = "1.1.0"
+version = "1.5.1"
 authors = ["Foundry Contributors"]
 build = false
 autolib = false
@@ -22,7 +22,7 @@ autoexamples = false
 autotests = false
 autobenches = false
 description = "Foundry configuration"
-homepage = "https://github.com/foundry-rs/foundry"
+homepage = "https://getfoundry.sh"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/foundry-rs/foundry"
@@ -37,16 +37,14 @@ path = "src/lib.rs"
 [dependencies]
 glob = "0.3"
 globset = "0.4"
-heck = "0.5"
-number_prefix = "0.4"
-toml_edit = "0.22"
+unit-prefix = "0.5.2"
 
 [dependencies.alloy-chains]
-version = "0.1"
+version = "0.2"
 features = ["serde"]
 
 [dependencies.alloy-primitives]
-version = "0.8.22"
+version = "1.5.1"
 features = [
     "getrandom",
     "rand",
@@ -54,6 +52,10 @@ features = [
     "map-foldhash",
     "serde",
 ]
+
+[dependencies.clap]
+version = "4"
+features = ["derive"]
 
 [dependencies.dirs]
 version = "6"
@@ -72,20 +74,33 @@ features = [
 ]
 
 [dependencies.foundry-block-explorers]
-version = "0.13.0"
+version = "0.22.0"
 features = ["foundry-compilers"]
 default-features = false
 
 [dependencies.foundry-compilers]
-version = "0.14.0"
-features = ["svm-solc"]
+version = "0.19.10"
+features = [
+    "rustls",
+    "svm-solc",
+    "svm-solc",
+]
 default-features = false
+
+[dependencies.foundry-evm-networks]
+path = "../evm/networks"
+
+[dependencies.heck]
+version = "0.5"
 
 [dependencies.itertools]
 version = "0.14"
 
 [dependencies.mesc]
 version = "0.3"
+
+[dependencies.rayon]
+version = "1"
 
 [dependencies.regex]
 version = "1"
@@ -99,8 +114,8 @@ features = [
 ]
 default-features = false
 
-[dependencies.revm-primitives]
-version = "15.1.0"
+[dependencies.revm]
+version = "33.1.0"
 default-features = false
 
 [dependencies.semver]
@@ -115,20 +130,24 @@ features = ["derive"]
 version = "1.0"
 features = ["arbitrary_precision"]
 
-[dependencies.solar-parse]
-version = "=0.1.2"
+[dependencies.solar]
+version = "=0.1.8"
 default-features = false
+package = "solar-compiler"
 
 [dependencies.soldeer-core]
-version = "=0.5.4"
+version = "=0.10.0"
 features = ["serde"]
 
 [dependencies.thiserror]
 version = "2"
 
 [dependencies.toml]
-version = "0.8"
+version = "0.9"
 features = ["preserve_order"]
+
+[dependencies.toml_edit]
+version = "0.24"
 
 [dependencies.tracing]
 version = "0.1"
@@ -148,15 +167,28 @@ version = "0.10"
 features = ["test"]
 
 [dev-dependencies.similar-asserts]
-version = "1.6"
+version = "1.7"
+
+[dev-dependencies.snapbox]
+version = "0.6"
+features = [
+    "json",
+    "regex",
+    "term-svg",
+]
 
 [dev-dependencies.tempfile]
-version = "3.13"
+version = "3.23"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 path-slash = "0.2"
 
 [lints.clippy]
+borrow_as_ptr = "warn"
+branches_sharing_code = "warn"
+clear_with_drain = "warn"
+cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
 dbg-macro = "warn"
 explicit_iter_loop = "warn"
 literal-string-with-formatting-args = "allow"
@@ -169,6 +201,7 @@ use-self = "warn"
 
 [lints.rust]
 redundant-lifetimes = "warn"
+redundant_imports = "warn"
 rust-2018-idioms = "warn"
 unused-must-use = "warn"
 

@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.89"
 name = "svm-rs-builds"
-version = "0.5.11"
+version = "0.5.22"
 authors = [
     "Rohit Narurkar <rohit.narurkar@protonmail.com>",
     "Matthias Seitz <matthias.seitz@outlook.de>",
@@ -30,6 +30,7 @@ homepage = "https://github.com/alloy-rs/svm-rs"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alloy-rs/svm-rs"
+resolver = "2"
 
 [package.metadata.docs.rs]
 features = ["_offline"]
@@ -41,9 +42,6 @@ _offline = []
 name = "svm_rs_builds"
 path = "src/lib.rs"
 
-[dependencies.build_const]
-version = "0.2"
-
 [dependencies.hex]
 version = "1.10"
 package = "const-hex"
@@ -51,9 +49,6 @@ package = "const-hex"
 [dependencies.semver]
 version = "1"
 features = ["serde"]
-
-[build-dependencies.build_const]
-version = "0.2"
 
 [build-dependencies.hex]
 version = "1.10"
@@ -67,7 +62,7 @@ features = ["serde"]
 version = "1"
 
 [build-dependencies.svm]
-version = "0.5.11"
+version = "0.5.22"
 features = [
     "blocking",
     "rustls",

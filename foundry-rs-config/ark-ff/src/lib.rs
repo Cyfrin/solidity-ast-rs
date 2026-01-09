@@ -14,11 +14,14 @@
 extern crate ark_std;
 
 #[macro_use]
-extern crate derivative;
+extern crate educe;
 
 #[macro_use]
 pub mod biginteger;
-pub use self::biginteger::*;
+pub use biginteger::{
+    signed_mod_reduction, BigInt, BigInteger, BigInteger128, BigInteger256, BigInteger320,
+    BigInteger384, BigInteger448, BigInteger64, BigInteger768, BigInteger832,
+};
 
 #[macro_use]
 pub mod fields;
@@ -34,19 +37,16 @@ pub use ark_std::UniformRand;
 mod to_field_vec;
 pub use to_field_vec::ToConstraintField;
 
-pub use num_traits::{One, Zero};
-
 #[doc(hidden)]
 pub use ark_ff_asm::*;
 #[doc(hidden)]
 pub use ark_std::vec;
 
 pub mod prelude {
-    pub use crate::biginteger::BigInteger;
-
-    pub use crate::fields::{Field, PrimeField};
-
+    pub use crate::{
+        biginteger::BigInteger,
+        fields::{Field, PrimeField},
+        One, Zero,
+    };
     pub use ark_std::UniformRand;
-
-    pub use num_traits::{One, Zero};
 }

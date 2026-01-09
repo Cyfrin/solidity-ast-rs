@@ -1,12 +1,12 @@
 use quote::{quote, quote_spanned, ToTokens, TokenStreamExt};
 use syn::spanned::Spanned;
 
-use crate::options::{AttrsField, ForwardAttrsFilter};
+use crate::options::{ForwardAttrsFilter, ForwardedField};
 
 #[derive(Default)]
 pub struct ForwardAttrs<'a> {
     pub filter: Option<&'a ForwardAttrsFilter>,
-    pub field: Option<&'a AttrsField>,
+    pub field: Option<&'a ForwardedField>,
 }
 
 impl ForwardAttrs<'_> {
@@ -37,12 +37,12 @@ impl ForwardAttrs<'_> {
     }
 
     /// Get the field initializer for use when building the deriving struct.
-    pub fn as_initializer(&self) -> Option<Initializer<'_>> {
-        self.field.map(Initializer)
+    pub fn as_initializer<'a>(&'a self) -> Option<impl 'a + ToTokens> {
+        self.field.map(|f| f.as_initializer())
     }
 }
 
-pub struct Declaration<'a>(pub &'a AttrsField);
+pub struct Declaration<'a>(pub &'a ForwardedField);
 
 impl ToTokens for Declaration<'_> {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
@@ -54,25 +54,16 @@ impl ToTokens for Declaration<'_> {
     }
 }
 
-pub struct ValuePopulator<'a>(pub &'a AttrsField);
+pub struct ValuePopulator<'a>(pub &'a ForwardedField);
 
 impl ToTokens for ValuePopulator<'_> {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let AttrsField { ident, with } = self.0;
+        let ForwardedField { ident, with } = self.0;
         let initializer_expr = match with {
             Some(with) => quote_spanned!(with.span()=> __errors.handle(#with(__fwd_attrs))),
             None => quote!(::darling::export::Some(__fwd_attrs)),
         };
         tokens.append_all(quote!(#ident = #initializer_expr;));
-    }
-}
-
-pub struct Initializer<'a>(pub &'a AttrsField);
-
-impl ToTokens for Initializer<'_> {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let ident = &self.0.ident;
-        tokens.append_all(quote!(#ident: #ident.expect("Errors were already checked"),));
     }
 }
 

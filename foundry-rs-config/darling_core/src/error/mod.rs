@@ -18,10 +18,11 @@ use syn::{Expr, Lit, LitStr, Path};
 #[cfg(feature = "diagnostics")]
 mod child;
 mod kind;
+mod util;
 
 use crate::util::path_to_string;
 
-use self::kind::{ErrorKind, ErrorUnknownField};
+use self::kind::{ErrorKind, ErrorUnknownValue, UnknownValuePosition};
 
 /// An alias of `Result` specific to attribute parsing.
 pub type Result<T> = ::std::result::Result<T, Error>;
@@ -105,7 +106,7 @@ impl Error {
     /// Creates a new error for a field name that appears in the input but does not correspond
     /// to a known field.
     pub fn unknown_field(name: &str) -> Self {
-        Error::new(ErrorKind::UnknownField(name.into()))
+        Error::new(ErrorUnknownValue::new(UnknownValuePosition::Field, name).into())
     }
 
     /// Creates a new error for a field name that appears in the input but does not correspond
@@ -122,7 +123,9 @@ impl Error {
         T: AsRef<str> + 'a,
         I: IntoIterator<Item = &'a T>,
     {
-        Error::new(ErrorUnknownField::with_alts(field, alternates).into())
+        Error::new(
+            ErrorUnknownValue::with_alts(UnknownValuePosition::Field, field, alternates).into(),
+        )
     }
 
     /// Creates a new error for a field name that appears in the input but does not correspond to
@@ -133,7 +136,14 @@ impl Error {
         T: AsRef<str> + 'a,
         I: IntoIterator<Item = &'a T>,
     {
-        Error::new(ErrorUnknownField::with_alts(&path_to_string(field), alternates).into())
+        Error::new(ErrorKind::UnknownField(
+            ErrorUnknownValue::with_alts(
+                UnknownValuePosition::Field,
+                &path_to_string(field),
+                alternates,
+            )
+            .into(),
+        ))
     }
 
     /// Creates a new error for a struct or variant that does not adhere to the supported shape.
@@ -254,7 +264,17 @@ impl Error {
 
     /// Creates a new error for a value which doesn't match a set of expected literals.
     pub fn unknown_value(value: &str) -> Self {
-        Error::new(ErrorKind::UnknownValue(value.into()))
+        Error::new(ErrorUnknownValue::new(UnknownValuePosition::Value, value).into())
+    }
+
+    pub fn unknown_value_with_alts<'a, T, I>(value: &str, alternates: I) -> Self
+    where
+        T: AsRef<str> + 'a,
+        I: IntoIterator<Item = &'a T>,
+    {
+        Error::new(
+            ErrorUnknownValue::with_alts(UnknownValuePosition::Value, value, alternates).into(),
+        )
     }
 
     /// Creates a new error for a list which did not get enough items to proceed.
@@ -422,22 +442,46 @@ impl Error {
             return self;
         }
 
+        // This is a callback because we don't want to use the iterator
+        // if we don't need to.
+        let collect_alts = || {
+            alternates
+                .into_iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+        };
+
         if let ErrorKind::UnknownField(unknown_field) = &mut self.kind {
-            unknown_field.add_alts(alternates);
+            unknown_field.add_alts(&collect_alts());
         } else if let ErrorKind::Multiple(errors) = self.kind {
-            let alternates = alternates.into_iter().collect::<Vec<_>>();
+            // Gather up the alternates to avoid unnecessary allocations
+            // on a per-contained-error basis.
+            let alts = collect_alts();
             self.kind = ErrorKind::Multiple(
                 errors
                     .into_iter()
-                    .map(|err| {
-                        err.add_sibling_alts_for_unknown_field(
-                            // This clone seems like it shouldn't be necessary.
-                            // Attempting to borrow alternates here leads to the following compiler error:
-                            //
-                            // error: reached the recursion limit while instantiating `darling::Error::add_sibling_alts_for_unknown_field::<'_, &&&&..., ...>`
-                            alternates.clone(),
-                        )
-                    })
+                    .map(|err| err.add_sibling_alts_for_unknown_field_internal(&alts))
+                    .collect(),
+            )
+        }
+
+        self
+    }
+
+    fn add_sibling_alts_for_unknown_field_internal(mut self, alternates: &[&str]) -> Self {
+        // The error may have bubbled up before this method was called,
+        // and in those cases adding alternates would be incorrect.
+        if !self.locations.is_empty() {
+            return self;
+        }
+
+        if let ErrorKind::UnknownField(unknown_field) = &mut self.kind {
+            unknown_field.add_alts(alternates);
+        } else if let ErrorKind::Multiple(errors) = self.kind {
+            self.kind = ErrorKind::Multiple(
+                errors
+                    .into_iter()
+                    .map(|err| err.add_sibling_alts_for_unknown_field_internal(alternates))
                     .collect(),
             )
         }
@@ -503,6 +547,7 @@ impl Error {
         // since it's redundant and not consistent with native compiler diagnostics.
         let diagnostic = match self.kind {
             ErrorKind::UnknownField(euf) => euf.into_diagnostic(self.span),
+            ErrorKind::UnknownValue(euv) => euv.into_diagnostic(self.span),
             _ => match self.span {
                 Some(span) => span.unwrap().error(self.kind.to_string()),
                 None => Diagnostic::new(Level::Error, self.to_string()),
@@ -624,10 +669,6 @@ impl Error {
 }
 
 impl StdError for Error {
-    fn description(&self) -> &str {
-        self.kind.description()
-    }
-
     fn cause(&self) -> Option<&dyn StdError> {
         None
     }

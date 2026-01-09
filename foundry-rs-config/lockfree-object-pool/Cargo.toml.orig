@@ -1,0 +1,26 @@
+[package]
+name = "lockfree-object-pool"
+description = "A thread-safe object pool collection with automatic return and attach/detach semantics."
+version = "0.1.6"
+readme = "README.md"
+authors = ["Etienne Vaillant <vaillant.etienne@gmail.com>"]
+edition = "2021"
+license = "BSL-1.0"
+documentation = "https://docs.rs/lockfree-object-pool"
+homepage = "https://github.com/EVaillant/lockfree-object-pool"
+repository = "https://github.com/EVaillant/lockfree-object-pool"
+keywords = ["atomic", "object-pool", "non-blocking", "lock-free"]
+categories = ["concurrency", "memory-management", "data-structures"]
+exclude = ["benches/criterion"]
+
+[dependencies]
+
+[dev-dependencies]
+sharded-slab = "0.1"
+object-pool = "0.5"
+criterion = "0.5.1"
+criterion-plot = "0.5"
+
+[[bench]]
+name = "bench"
+harness = false

@@ -1,5 +1,4 @@
 #![allow(clippy::missing_inline_in_public_items)] // allow format functions
-#![cfg(feature = "alloc")]
 
 use crate::Uint;
 use core::{
@@ -9,71 +8,72 @@ use core::{
 
 mod base {
     pub(super) trait Base {
-        /// Highest power of the base that fits in a `u64`.
-        const MAX: u64;
-        /// Number of characters written using `MAX` as the base in
-        /// `to_base_be`.
-        ///
-        /// This is `MAX.log(base)`.
-        const WIDTH: usize;
+        /// The base.
+        const BASE: u64;
         /// The prefix for the base.
         const PREFIX: &'static str;
+
+        /// Highest power of the base that fits in a `u64`.
+        const MAX: u64 = crate::utils::max_pow_u64(Self::BASE);
+        /// Number of characters written using `MAX` as the base in
+        /// `to_base_be`.
+        const WIDTH: usize = Self::MAX.ilog(Self::BASE) as _;
     }
 
     pub(super) struct Binary;
     impl Base for Binary {
-        const MAX: u64 = 1 << 63;
-        const WIDTH: usize = 63;
+        const BASE: u64 = 2;
         const PREFIX: &'static str = "0b";
     }
 
     pub(super) struct Octal;
     impl Base for Octal {
-        const MAX: u64 = 1 << 63;
-        const WIDTH: usize = 21;
+        const BASE: u64 = 8;
         const PREFIX: &'static str = "0o";
     }
 
     pub(super) struct Decimal;
     impl Base for Decimal {
-        const MAX: u64 = 10_000_000_000_000_000_000;
-        const WIDTH: usize = 19;
+        const BASE: u64 = 10;
         const PREFIX: &'static str = "";
     }
 
     pub(super) struct Hexadecimal;
     impl Base for Hexadecimal {
-        const MAX: u64 = 1 << 60;
-        const WIDTH: usize = 15;
+        const BASE: u64 = 16;
         const PREFIX: &'static str = "0x";
     }
 }
 use base::Base;
 
-macro_rules! write_digits {
-    ($self:expr, $f:expr; $base:ty, $base_char:literal) => {
-        if LIMBS == 0 || $self.is_zero() {
-            return $f.pad_integral(true, <$base>::PREFIX, "0");
-        }
-        // Use `BITS` for all bases since `generic_const_exprs` is not yet stable.
-        let mut buffer = DisplayBuffer::<BITS>::new();
-        for (i, spigot) in $self.to_base_be(<$base>::MAX).enumerate() {
-            write!(
-                buffer,
-                concat!("{:0width$", $base_char, "}"),
-                spigot,
-                width = if i == 0 { 0 } else { <$base>::WIDTH },
-            )
-            .unwrap();
-        }
-        return $f.pad_integral(true, <$base>::PREFIX, buffer.as_str());
-    };
-}
+macro_rules! impl_fmt {
+    ($tr:path; $base:ty, $base_char:literal) => {
+        impl<const BITS: usize, const LIMBS: usize> $tr for Uint<BITS, LIMBS> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                if let Ok(small) = u64::try_from(self) {
+                    return <u64 as $tr>::fmt(&small, f);
+                }
+                if let Ok(small) = u128::try_from(self) {
+                    return <u128 as $tr>::fmt(&small, f);
+                }
 
-impl<const BITS: usize, const LIMBS: usize> fmt::Display for Uint<BITS, LIMBS> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_digits!(self, f; base::Decimal, "");
-    }
+                // Use `BITS` for all bases since `generic_const_exprs` is not yet stable.
+                let mut s = StackString::<BITS>::new();
+                let mut first = true;
+                for spigot in self.to_base_be_2(<$base>::MAX) {
+                    write!(
+                        s,
+                        concat!("{:0width$", $base_char, "}"),
+                        spigot,
+                        width = if first { 0 } else { <$base>::WIDTH },
+                    )
+                    .unwrap();
+                    first = false;
+                }
+                f.pad_integral(true, <$base>::PREFIX, s.as_str())
+            }
+        }
+    };
 }
 
 impl<const BITS: usize, const LIMBS: usize> fmt::Debug for Uint<BITS, LIMBS> {
@@ -82,59 +82,42 @@ impl<const BITS: usize, const LIMBS: usize> fmt::Debug for Uint<BITS, LIMBS> {
     }
 }
 
-impl<const BITS: usize, const LIMBS: usize> fmt::Binary for Uint<BITS, LIMBS> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_digits!(self, f; base::Binary, "b");
-    }
-}
+impl_fmt!(fmt::Display; base::Decimal, "");
+impl_fmt!(fmt::Binary; base::Binary, "b");
+impl_fmt!(fmt::Octal; base::Octal, "o");
+impl_fmt!(fmt::LowerHex; base::Hexadecimal, "x");
+impl_fmt!(fmt::UpperHex; base::Hexadecimal, "X");
 
-impl<const BITS: usize, const LIMBS: usize> fmt::Octal for Uint<BITS, LIMBS> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_digits!(self, f; base::Octal, "o");
-    }
-}
-
-impl<const BITS: usize, const LIMBS: usize> fmt::LowerHex for Uint<BITS, LIMBS> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_digits!(self, f; base::Hexadecimal, "x");
-    }
-}
-
-impl<const BITS: usize, const LIMBS: usize> fmt::UpperHex for Uint<BITS, LIMBS> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_digits!(self, f; base::Hexadecimal, "X");
-    }
-}
-
-struct DisplayBuffer<const SIZE: usize> {
-    buf: [MaybeUninit<u8>; SIZE],
+/// A stack-allocated buffer that implements [`fmt::Write`].
+pub(crate) struct StackString<const SIZE: usize> {
     len: usize,
+    buf: [MaybeUninit<u8>; SIZE],
 }
 
-impl<const SIZE: usize> DisplayBuffer<SIZE> {
+impl<const SIZE: usize> StackString<SIZE> {
     #[inline]
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
-            buf: unsafe { MaybeUninit::uninit().assume_init() },
             len: 0,
+            buf: unsafe { MaybeUninit::uninit().assume_init() },
         }
     }
 
     #[inline]
-    fn as_str(&self) -> &str {
+    pub(crate) const fn as_str(&self) -> &str {
         // SAFETY: `buf` is only written to by the `fmt::Write::write_str`
         // implementation which writes a valid UTF-8 string to `buf` and
         // correctly sets `len`.
-        unsafe { core::str::from_utf8_unchecked(&self.as_bytes_full()[..self.len]) }
+        unsafe { core::str::from_utf8_unchecked(self.as_bytes()) }
     }
 
     #[inline]
-    const unsafe fn as_bytes_full(&self) -> &[u8] {
-        unsafe { &*(self.buf.as_slice() as *const [_] as *const [u8]) }
+    const fn as_bytes(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.buf.as_ptr().cast(), self.len) }
     }
 }
 
-impl<const SIZE: usize> fmt::Write for DisplayBuffer<SIZE> {
+impl<const SIZE: usize> fmt::Write for StackString<SIZE> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         if self.len + s.len() > SIZE {
             return Err(fmt::Error);
@@ -144,6 +127,18 @@ impl<const SIZE: usize> fmt::Write for DisplayBuffer<SIZE> {
             core::ptr::copy_nonoverlapping(s.as_ptr(), dst, s.len());
         }
         self.len += s.len();
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        let clen = c.len_utf8();
+        if self.len + clen > SIZE {
+            return Err(fmt::Error);
+        }
+        c.encode_utf8(unsafe {
+            core::slice::from_raw_parts_mut(self.buf.as_mut_ptr().add(self.len).cast(), clen)
+        });
+        self.len += clen;
         Ok(())
     }
 }

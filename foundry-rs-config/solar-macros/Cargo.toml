@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.83"
+edition = "2024"
+rust-version = "1.88"
 name = "solar-macros"
-version = "0.1.2"
+version = "0.1.8"
 authors = ["DaniPopes <57450786+DaniPopes@users.noreply.github.com>"]
 build = false
 autolib = false
@@ -38,12 +38,14 @@ categories = [
 ]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/solar"
+resolver = "2"
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = [
-    "--cfg",
-    "docsrs",
+    "-Zunstable-options",
+    "--generate-link-to-definition",
+    "--show-type-layout",
 ]
 
 [features]

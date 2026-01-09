@@ -44,6 +44,9 @@ pub enum AuthError {
     #[error("login error: invalid email or password")]
     InvalidCredentials,
 
+    #[error("login error: invalid token")]
+    InvalidToken,
+
     #[error("missing token, run `soldeer login`")]
     MissingToken,
 
@@ -96,11 +99,16 @@ pub enum ConfigError {
     #[error("error during config operation: {0}")]
     DownloadError(#[from] DownloadError),
 
-    #[error("the version requirement string for {0} cannot contain the equal symbol for git dependencies and http dependencies with a custom URL")]
+    #[error(
+        "the version requirement string for {0} cannot contain the equal symbol for git dependencies and http dependencies with a custom URL"
+    )]
     InvalidVersionReq(String),
 
     #[error("dependency specifier {0} cannot be parsed as name~version")]
     InvalidNameAndVersion(String),
+
+    #[error("invalid project root path in {dep_path}: {project_root}")]
+    InvalidProjectRoot { project_root: PathBuf, dep_path: PathBuf },
 }
 
 #[derive(Error, Debug)]
@@ -112,8 +120,8 @@ pub enum DownloadError {
     #[error("error extracting dependency: {0}")]
     UnzipError(#[from] zip_extract::ZipExtractError),
 
-    #[error("error during git operation: {0}")]
-    GitError(String),
+    #[error("error during git command {args:?}: {message}")]
+    GitError { message: String, args: Vec<String> },
 
     #[error("error during IO operation for {path:?}: {source}")]
     IOError { path: PathBuf, source: io::Error },
@@ -180,8 +188,8 @@ pub enum LockError {
     #[error("error generating soldeer.lock contents: {0}")]
     SerializeError(#[from] toml_edit::ser::Error),
 
-    #[error("lock entry does not match expected type")]
-    TypeMismatch,
+    #[error("lock entry does not match a valid format")]
+    InvalidLockEntry,
 
     #[error("missing `{field}` field in lock entry for {dep}")]
     MissingField { field: String, dep: String },
@@ -208,7 +216,9 @@ pub enum PublishError {
     #[error("registry error during publishing: {0}")]
     DownloadError(#[from] RegistryError),
 
-    #[error("Project not found. Make sure you send the right dependency name. The dependency name is the project name you created on https://soldeer.xyz")]
+    #[error(
+        "Project not found. Make sure you send the right dependency name. The dependency name is the project name you created on https://soldeer.xyz"
+    )]
     ProjectNotFound,
 
     #[error("dependency already exists")]
@@ -220,7 +230,9 @@ pub enum PublishError {
     #[error("http error during publishing: {0}")]
     HttpError(#[from] reqwest::Error),
 
-    #[error("invalid package name, only alphanumeric characters, `-` and `@` are allowed. Length must be between 3 and 100 characters")]
+    #[error(
+        "invalid package name, only alphanumeric characters, `-` and `@` are allowed. Length must be between 3 and 100 characters"
+    )]
     InvalidName,
 
     #[error("package version cannot be empty")]
@@ -242,8 +254,13 @@ pub enum RegistryError {
     #[error("could not get the dependency URL for {0}")]
     URLNotFound(String),
 
-    #[error("project {0} not found, please check the dependency name (project name) or create a new project on https://soldeer.xyz")]
+    #[error(
+        "project {0} not found. Private projects require to log in before install. Please check the dependency name (project name) or create a new project on https://soldeer.xyz"
+    )]
     ProjectNotFound(String),
+
+    #[error("auth error: {0}")]
+    AuthError(#[from] AuthError),
 
     #[error("package {0} has no version")]
     NoVersion(String),
