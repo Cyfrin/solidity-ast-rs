@@ -44,17 +44,19 @@ Set the value here:
 
 10. Make a Git commit and Push the changes to remote branch. Make sure integration tests for solidity-ast-rs pass in CI.
 
-11. Now, before merging to main, you need to test if these changes are compatible with Aderyn. To do that uncomment the following line in Aderyn's Cargo.toml and
-    replace the value of `branch` with the name of the branch you pushed to in the above step.
+11. Now, before merging to main, you need to test if these remote changes in solidity-ast-rs are compatible with downstream Aderyn. To do that checkout a new branch locally in Aderyn and uncomment the highlited line below in [Aderyn's Cargo.toml](https://github.com/Cyfrin/aderyn/blob/dev/Cargo.toml) and replace the value of branch i.e `feat/replace-me` with the name of the branch you pushed to in the above step.
+
+Also comment out the line above the highlited line.
 
 <img width="1296" height="581" alt="Screenshot 2026-01-10 at 1 10 55 PM" src="https://github.com/user-attachments/assets/df9beb55-64c4-4abf-bc17-dd942c9bef1a" />
 
 12. Run `cargo test` inside Aderyn's repository. You may need to adjust some dependency versions of Aderyn. (We must give into whatever versions foundry choses and adjust our side of the code)
 
-    Also push Aderyn's testing branch to remote so CI can do integration tests (temporary branch). Once they all pass,
-     merge solidity-ast-rs upgrade branch to main. (because it is now safe to merge) 
+Also push Aderyn's testing branch to remote so CI can do integration tests (temporary branch). 
 
-13. After merging upgrade branch in solidity-ast-rs, cut a new release. Click in the place shown below and Draft a new release.
+**Once they all pass, merge solidity-ast-rs upgrade branch to main. (because it is now safe to merge) **
+
+13. After merging upgrade branch in solidity-ast-rs, cut a new release in solidity-ast-rs. Click in the place shown below and Draft a new release.
 
 <img width="1256" height="689" alt="Screenshot 2026-01-10 at 1 17 25 PM" src="https://github.com/user-attachments/assets/b40bd89b-365f-4aed-af5f-18ff09abd726" />
 
@@ -70,11 +72,13 @@ Select pre-release:
 
 foundry-compilers is not yet 1.0 therefore we will always be behind. (That's okay)
 
-14. Once the upgraded release is made on soldiity-ast-rs, go back to to Aderyn's branch. This time, uncomment a different line shown below. Bump up the value of the tag shown below to point to the latest soldiity-ast-rs version that was just released. 
+14. Once the upgraded release is made on soldiity-ast-rs, go back to to Aderyn's branch. This time, uncomment the first line (highlited below). And uncomment the line below it (which you commented above).
+
+ Bump up the value of the `tag` to point to the latest soldiity-ast-rs version that was just released. 
 
 <img width="1269" height="617" alt="Screenshot 2026-01-10 at 1 22 50 PM" src="https://github.com/user-attachments/assets/09126e1c-6fc1-4770-9408-f3aea5852bdf" />
 
-15. Push the aderyn changes to remote branch. Let the CI re-run integration tests. (We know for sure this time, that it will pass)
+15. Push the local aderyn changes to remote branch. Let the CI re-run integration tests. (We know for sure this time, that it will pass)
 
 16. Merge Aderyn changes to `dev` branch (which acts like main branch)
 
