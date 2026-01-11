@@ -28,6 +28,10 @@ pub fn ast_info(root: &str) -> Result<DerivedAstEvmInfo> {
 
 To be the fastest AST generator for [Aderyn](https://github.com/cyfrin/aderyn)
 
+## Maintenance
+
+Checkout the detailed steps to upgrade foundry dependencies documented in **[CONTRIBUTING.md](https://github.com/Cyfrin/solidity-ast-rs/blob/main/CONTRIBUTING.md)**
+
 ## Credits
 
 This project exists thanks to all the people who [contribute](/CONTRIBUTING.md).<br>
