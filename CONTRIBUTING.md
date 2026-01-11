@@ -4,7 +4,14 @@ Checkout a new branch and do upgrade and do the following:
 
 1. See the latest tag (vX.Y.Z) from [Foundry Compilers](https://github.com/foundry-rs/compilers/tags). Set the value in [Cargo.toml](https://github.com/Cyfrin/solidity-ast-rs/blob/main/Cargo.toml) to refelect that version.
 
+See here:
+
 <img width="878" height="692" alt="Screenshot 2026-01-10 at 12 58 21 PM" src="https://github.com/user-attachments/assets/9c1a90fc-d9d3-49f9-80b4-ae07d8e2cdcd" />
+
+Set the value here:
+
+<img width="1308" height="677" alt="Screenshot 2026-01-11 at 1 14 42 PM" src="https://github.com/user-attachments/assets/b4304db2-8e1a-4c9d-a3e3-e7291139e696" />
+
 
 2. Now, make a git commit. (Acts like a checkpoint)
 
