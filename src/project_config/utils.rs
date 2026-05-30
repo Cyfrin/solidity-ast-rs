@@ -24,6 +24,7 @@ impl ProjectConfigInput {
         let create_standard_json_for_ast = |sources: Sources, version: &Version| -> SolcInput {
             let mut settings = Settings::new(OutputSelection::ast_output_selection());
             settings.remappings = self.project_paths.remappings.clone();
+            settings.evm_version = Some(self.evm_version);
             settings.sanitize(version, SolcLanguage::Solidity);
             let root = utils::canonicalize(self.root.clone()).expect("root failed to canonicalize");
             let mut solc_input = SolcInput::new(SolcLanguage::Solidity, sources, settings);

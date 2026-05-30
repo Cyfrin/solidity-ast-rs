@@ -171,3 +171,23 @@ mod foundry_fix_version {
         assert_eq!(values.sources.len(), 1);
     }
 }
+
+#[allow(unused_imports)]
+mod foundry_evm_version {
+    use foundry_compilers::artifacts::EvmVersion;
+
+    use crate::common::get_compiler_input;
+
+    use super::{assert_eq, *};
+
+    const ROOT: &str = "test-configs/foundry-evm-version";
+
+    #[test]
+    fn compiler_input_respects_configured_evm_version() {
+        let c = get_compiler_input(ROOT).unwrap();
+        assert_eq!(c.len(), 1);
+
+        let values = c.values().next().expect("No files found");
+        assert_eq!(values.settings.evm_version, Some(EvmVersion::Osaka));
+    }
+}
